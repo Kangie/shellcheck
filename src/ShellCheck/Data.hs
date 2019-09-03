@@ -55,6 +55,567 @@ portageInternalVariables = [
     "QA_TEXTRELS", "QA_WX_LOAD", "RDEPEND", "REQUIRED_USE", "RESTRICT", "ROOT",
     "S", "SLOT", "SRC_TEST", "SRC_URI", "STRIP_MASK", "SUBSLOT", "SYSROOT",
     "T", "WORKDIR"
+
+    -- generic ebuilds
+    , "A", "BDEPEND", "BROOT", "CATEGORY", "D", "DEPEND", "DESCRIPTION",
+    "DISTDIR", "DOCS", "EAPI", "ED", "EPREFIX", "EROOT", "ESYSROOT", "FILESDIR",
+    "HOME", "HOMEPAGE", "HTML_DOCS", "IUSE", "KEYWORDS", "LICENSE", "P",
+    "PATCHES", "PDEPEND", "PF", "PN", "PR", "PROPERTIES", "PV", "PVR",
+    "QA_AM_MAINTAINER_MODE", "QA_CONFIGURE_OPTIONS", "QA_DESKTOP_FILE",
+    "QA_DT_NEEDED", "QA_EXECSTACK", "QA_FLAGS_IGNORED", "QA_MULTILIB_PATHS",
+    "QA_PREBUILT", "QA_PRESTRIPPED", "QA_SONAME", "QA_SONAME_NO_SYMLINK",
+    "QA_TEXTRELS", "QA_WX_LOAD", "RDEPEND", "REQUIRED_USE", "RESTRICT", "ROOT",
+    "S", "SLOT", "SRC_TEST", "SRC_URI", "STRIP_MASK", "SUBSLOT", "SYSROOT",
+    "T", "WORKDIR",
+
+    -- alternatives.eclass
+    "ALTERNATIVES", "SOURCE",
+
+    -- apache-2.eclass
+    "GENTOO_DEVELOPER", "GENTOO_PATCHDIR", "GENTOO_PATCHNAME",
+    "GENTOO_PATCHSTAMP", "GENTOO_PATCH_A", "IUSE_MODULES", "IUSE_MPMS_FORK",
+    "IUSE_MPMS_THREAD", "MODULE_CRITICAL", "MODULE_DEFINES", "MODULE_DEPENDS",
+    "MY_CONF", "MY_MODS", "MY_MPM",
+
+    -- apache-module.eclass
+    "APACHE2_EXECFILES", "APACHE2_MOD_CONF", "APACHE2_MOD_DEFINE",
+    "APACHE2_MOD_FILE", "APACHE2_VHOST_CONF", "APXS2_ARGS", "APXS2_S",
+    "DOCFILES",
+
+    -- arc-build.eclass
+    "ARC_BASE", "ARC_LLVM_VERSION", "ARC_VERSION_MAJOR", "ARC_VERSION_MINOR",
+    "ARC_VERSION_PATCH",
+
+    -- aspell-dict.eclass
+    "ASPELL_LANG", "ASPOSTFIX",
+
+    -- autotest-external-dep.eclass
+    "PACKAGE",
+
+    -- autotest.eclass
+    "AUTOTEST_FILE_MASK", "AUTOTEST_FORCE_LIST",
+
+    -- autotools-utils.eclass
+    "AUTOTOOLS_AUTORECONF", "AUTOTOOLS_IN_SOURCE_BUILD",
+    "AUTOTOOLS_PRUNE_LIBTOOL_FILES", "BUILD_DIR", "ECONF_SOURCE", "myeconfargs",
+
+    -- autotools.eclass
+    "AM_OPTS", "AT_M4DIR", "AT_NOEAUTOMAKE", "AT_NOELIBTOOLIZE", "AT_SYS_M4DIR",
+    "AUTOTOOLS_AUTO_DEPEND", "WANT_AUTOCONF", "WANT_AUTOMAKE", "WANT_LIBTOOL",
+    "_LATEST_AUTOMAKE",
+
+    -- bash-completion.eclass
+    "BASHCOMPFILES", "BASHCOMPLETION_NAME",
+
+    -- boost-utils.eclass
+    "BOOST_MAX_SLOT",
+
+    -- bsdmk.eclass
+    "mymakeopts",
+
+    -- bzr.eclass
+    "EBZR_BOOTSTRAP", "EBZR_CACHE_DIR", "EBZR_DIFF_CMD", "EBZR_EXPORT_CMD",
+    "EBZR_FETCH_CMD", "EBZR_OFFLINE", "EBZR_OPTIONS", "EBZR_PATCHES",
+    "EBZR_REPO_URI", "EBZR_REVISION", "EBZR_REVNO_CMD", "EBZR_STORE_DIR",
+    "EBZR_UPDATE_CMD",
+
+    -- cbi-image.eclass
+    "CROS_CBI_IMAGE_DIR", "EEPROM_SIZE",
+
+    -- cdrom.eclass
+    "CDROM_OPTIONAL",
+
+    -- check-reqs.eclass
+    "CHECKREQS_DISK_BUILD", "CHECKREQS_DISK_USR", "CHECKREQS_DISK_VAR",
+    "CHECKREQS_FAILED", "CHECKREQS_MEMORY",
+
+    -- chromium-source.eclass
+    "CHROMIUM_GCLIENT_TEMPLATE",
+
+    -- chromium.eclass
+    "CHROMIUM_LANGS", "EGYP_CHROMIUM_COMMAND", "EGYP_CHROMIUM_DEPTH",
+
+    -- clutter.eclass
+    "EXAMPLES",
+
+    -- cmake-utils.eclass
+    "CMAKE_BINARY", "CMAKE_BUILD_TYPE", "CMAKE_EXTRA_CACHE_FILE",
+    "CMAKE_IN_SOURCE_BUILD", "CMAKE_MAKEFILE_GENERATOR", "CMAKE_MIN_VERSION",
+    "CMAKE_REMOVE_MODULES", "CMAKE_REMOVE_MODULES_LIST", "CMAKE_USE_DIR",
+    "CMAKE_VERBOSE", "CMAKE_WARN_UNUSED_CLI", "PREFIX", "WANT_CMAKE",
+    "mycmakeargs",
+
+    -- confutils.eclass
+    "EBUILD_SUPPORTS_SHAREDEXT",
+
+    -- cros-binary.eclass
+    "CROS_BINARY_LOCAL_URI_BASE", "CROS_BINARY_URI",
+
+    -- cros-camera.eclass
+    "CROS_CAMERA_TESTS",
+
+    -- cros-common.mk.eclass
+    "CROS_COMMON_MK_NATIVE_TEST",
+
+    -- cros-cpfe.eclass
+    "CROS_CPFE_BOARD_NAME", "CROS_CPFE_BOARD_OVERLAY", "CROS_CPFE_HOME",
+    "CROS_CPFE_OVERLAY_NAME", "CROS_CPFE_PATH", "CROS_CPFE_URL",
+    "CROS_CPFE_USER_NAME",
+
+    -- cros-ec-board.eclass
+    "EC_BOARDS",
+
+    -- cros-factory.eclass
+    "CROS_FACTORY_BOARD_RESOURCES_DIR",
+
+    -- cros-firmware.eclass
+    "CROS_FIRMWARE_BCS_OVERLAY", "CROS_FIRMWARE_EC_IMAGE",
+    "CROS_FIRMWARE_MAIN_IMAGE", "CROS_FIRMWARE_MAIN_RW_IMAGE",
+    "CROS_FIRMWARE_PD_IMAGE",
+
+    -- cros-go.eclass
+    "CROS_GO_BINARIES", "CROS_GO_PACKAGES", "CROS_GO_SOURCE", "CROS_GO_TEST",
+    "CROS_GO_VERSION", "CROS_GO_VET", "CROS_GO_VET_FLAGS", "CROS_GO_WORKSPACE",
+
+    -- cros-rust.eclass
+    "CROS_RUST_EMPTY_CRATE",
+
+    -- cros-unibuild.eclass
+    "CROS_CONFIG_BUILD_CONFIG_DUMP_FILE", "CROS_CONFIG_TEST_DIR",
+    "UNIBOARD_CROS_CONFIG_DIR", "UNIBOARD_C_CONFIG",
+    "UNIBOARD_JSON_INSTALL_PATH", "UNIBOARD_YAML_CONFIG", "UNIBOARD_YAML_DIR",
+
+    -- cros-workon.eclass
+    "CROS_WORKON_ALWAYS_LIVE", "CROS_WORKON_BLACKLIST", "CROS_WORKON_COMMIT",
+    "CROS_WORKON_DESTDIR", "CROS_WORKON_EGIT_BRANCH", "CROS_WORKON_GIT_SUFFIX",
+    "CROS_WORKON_INCREMENTAL_BUILD", "CROS_WORKON_INPLACE",
+    "CROS_WORKON_LOCALNAME", "CROS_WORKON_MAKE_COMPILE_ARGS",
+    "CROS_WORKON_OUTOFTREE_BUILD", "CROS_WORKON_PROJECT", "CROS_WORKON_REPO",
+    "CROS_WORKON_SRCPATH", "CROS_WORKON_SRCROOT", "CROS_WORKON_SUBDIRS_TO_COPY",
+    "CROS_WORKON_SUBDIRS_TO_REV", "CROS_WORKON_SUBTREE", "CROS_WORKON_TREE",
+    "CROS_WORKON_USE_VCSID",
+
+    -- cuda.eclass
+    "CUDA_VERBOSE", "NVCCFLAGS",
+
+    -- cvs.eclass
+    "ECVS_AUTH", "ECVS_BRANCH", "ECVS_CLEAN", "ECVS_CO_OPTS",
+    "ECVS_CVS_COMMAND", "ECVS_CVS_COMPRESS", "ECVS_CVS_OPTIONS", "ECVS_LOCAL",
+    "ECVS_LOCALNAME", "ECVS_MODULE", "ECVS_PASS", "ECVS_RUNAS", "ECVS_SERVER",
+    "ECVS_SSH_HOST_KEY", "ECVS_TOP_DIR", "ECVS_UP_OPTS", "ECVS_USER",
+
+    -- depend.apache.eclass
+    "APACHE2_2_DEPEND", "APACHE2_DEPEND", "APACHE_BASEDIR", "APACHE_BIN",
+    "APACHE_CONFDIR", "APACHE_CTL", "APACHE_DEPEND", "APACHE_MODULESDIR",
+    "APACHE_MODULES_CONFDIR", "APACHE_VERSION", "APACHE_VHOSTS_CONFDIR", "APXS",
+
+    -- depend.php.eclass
+    "PHPCHECKNODIE",
+
+    -- distutils-r1.eclass
+    "DISTUTILS_ALL_SUBPHASE_IMPLS", "DISTUTILS_IN_SOURCE_BUILD",
+    "DISTUTILS_OPTIONAL", "DISTUTILS_SINGLE_IMPL", "mydistutilsargs",
+
+    -- distutils.eclass
+    "DISTUTILS_DISABLE_TEST_DEPENDENCY", "DISTUTILS_GLOBAL_OPTIONS",
+    "DISTUTILS_SETUP_FILES", "DISTUTILS_SRC_TEST",
+    "DISTUTILS_USE_SEPARATE_SOURCE_DIRECTORIES",
+
+    -- dlc.eclass
+    "DLC_ARTIFACT_DIR", "DLC_FS_TYPE", "DLC_ID", "DLC_NAME",
+    "DLC_PREALLOC_BLOCKS", "DLC_VERSION",
+
+    -- elisp-common.eclass
+    "BYTECOMPFLAGS", "EMACS", "EMACSFLAGS", "SITEETC", "SITELISP",
+
+    -- elisp.eclass
+    "ELISP_PATCHES", "ELISP_TEXINFO", "NEED_EMACS", "SITEFILE",
+
+    -- emboss.eclass
+    "EBO_DESCRIPTION", "EBO_EAUTORECONF", "EBO_EXTRA_ECONF",
+
+    -- epatch.eclass
+    "EPATCH_COMMON_OPTS", "EPATCH_EXCLUDE", "EPATCH_FORCE", "EPATCH_MULTI_MSG",
+    "EPATCH_OPTS", "EPATCH_SINGLE_MSG", "EPATCH_SOURCE", "EPATCH_SUFFIX",
+    "EPATCH_USER_EXCLUDE", "EPATCH_USER_SOURCE",
+
+    -- fcaps.eclass
+    "FILECAPS",
+
+    -- font.eclass
+    "FONTDIR", "FONT_CONF", "FONT_PN", "FONT_S", "FONT_SUFFIX",
+
+    -- fortran-2.eclass
+    "FORTRAN_NEEDED", "FORTRAN_NEED_OPENMP", "FORTRAN_STANDARD",
+
+    -- freedict.eclass
+    "FORLANG", "TOLANG",
+
+    -- gems.eclass
+    "USE_RUBY",
+
+    -- git-2.eclass
+    "EGIT_ALL_BRANCH", "EGIT_BOOTSTRAP", "EGIT_BRANCH", "EGIT_COMMIT",
+    "EGIT_DIR", "EGIT_HAS_SUBMODULES", "EGIT_MASTER", "EGIT_NONBARE",
+    "EGIT_NOUNPACK", "EGIT_OPTIONS", "EGIT_PROJECT", "EGIT_PRUNE",
+    "EGIT_REPACK", "EGIT_REPO_URI", "EGIT_SOURCEDIR", "EGIT_STORE_DIR",
+    "EVCS_OFFLINE",
+
+    -- git-r3.eclass
+    "EGIT3_STORE_DIR", "EGIT_CHECKOUT_DIR", "EGIT_NONSHALLOW",
+
+    -- git-r3.eclass
+    "EGIT_CLONE_TYPE", "EGIT_COMMIT_DATE", "EGIT_MIN_CLONE_TYPE",
+    "EGIT_MIRROR_URI", "EGIT_SUBMODULES", "EVCS_UMASK",
+
+    -- git.eclass
+    "EGIT_DIFFSTAT_CMD", "EGIT_FETCH_CMD", "EGIT_OFFLINE", "EGIT_PATCHES",
+    "EGIT_QUIET", "EGIT_UPDATE_CMD",
+
+    -- git.eclass
+    "EGIT_UNPACK_DIR", "LIVE_FAIL_FETCH_IF_REPO_NOT_UPDATED",
+
+    -- gnome.org.eclass
+    "GNOME_ORG_MODULE", "GNOME_ORG_PVP", "GNOME_TARBALL_SUFFIX",
+
+    -- gnome2-utils.eclass
+    "GCONFTOOL_BIN", "GLIB_COMPILE_SCHEMAS", "GNOME2_ECLASS_GDK_PIXBUF_LOADERS",
+    "GNOME2_ECLASS_GLIB_SCHEMAS", "GNOME2_ECLASS_ICONS",
+    "GNOME2_ECLASS_SCHEMAS", "GNOME2_ECLASS_SCROLLS", "GTK_UPDATE_ICON_CACHE",
+    "SCROLLKEEPER_DIR", "SCROLLKEEPER_UPDATE_BIN",
+
+    -- gnome2.eclass
+    "ELTCONF", "G2CONF", "GCONF_DEBUG", "GNOME2_EAUTORECONF",
+    "GNOME2_ECLASS_GIO_MODULES", "GNOME2_LA_PUNT",
+
+    -- golang-base.eclass
+    "EGO_PN",
+
+    -- golang-build.eclass
+    "EGO_BUILD_FLAGS",
+
+    -- golang-vcs-snapshot.eclass
+    "EGO_VENDOR",
+
+    -- golang-vcs.eclass
+    "EGO_STORE_DIR",
+
+    -- gpe.eclass
+    "GPE_DOCS",
+
+    -- gtk-sharp-module.eclass
+    "EAUTORECONF", "GTK_SHARP_MODULE", "GTK_SHARP_MODULE_DIR",
+    "GTK_SHARP_REQUIRED_VERSION", "PV_MAJOR", "TARBALL", "gapi_users_list",
+
+    -- haskell-cabal.eclass
+    "CABAL_DEBUG_LOOSENING", "CABAL_EXTRA_BUILD_FLAGS",
+    "CABAL_EXTRA_CONFIGURE_FLAGS", "CABAL_EXTRA_TEST_FLAGS",
+    "GHC_BOOTSTRAP_FLAGS",
+
+    -- intel-sdp.eclass
+    "INTEL_ARCH", "INTEL_BIN_RPMS", "INTEL_DAT_RPMS", "INTEL_DID", "INTEL_DPN",
+    "INTEL_DPV", "INTEL_RPMS_DIRS", "INTEL_SDP_DB", "INTEL_SDP_DIR",
+    "INTEL_SDP_EDIR", "INTEL_SUBDIR", "INTEL_X86",
+
+    -- java-ant-2.eclass
+    "JAVA_ANT_CLASSPATH_TAGS", "JAVA_ANT_DISABLE_ANT_CORE_DEP",
+    "JAVA_ANT_IGNORE_SYSTEM_CLASSES", "JAVA_PKG_BSFIX", "JAVA_PKG_BSFIX_ALL",
+    "JAVA_PKG_BSFIX_NAME", "JAVA_PKG_BSFIX_SOURCE_TAGS",
+    "JAVA_PKG_BSFIX_TARGET_TAGS", "WANT_ANT_TASKS",
+
+    -- java-osgi.eclass
+    "_OSGI_T",
+
+    -- java-pkg-2.eclass
+    "JAVA_PKG_IUSE",
+
+    -- java-pkg-opt-2.eclass
+    "JAVA_PKG_OPT_USE",
+
+    -- java-pkg-simple.eclass
+    "JAVAC_ARGS", "JAVADOC_ARGS", "JAVA_ENCODING", "JAVA_GENTOO_CLASSPATH",
+    "JAVA_GENTOO_CLASSPATH_EXTRA", "JAVA_JAR_FILENAME", "JAVA_SRC_DIR",
+
+    -- java-utils-2.eclass
+    "JAVA_PKG_ALLOW_VM_CHANGE", "JAVA_PKG_COMPILERS_CONF",
+    "JAVA_PKG_COMPILER_DIR", "JAVA_PKG_DEBUG", "JAVA_PKG_E_DEPEND",
+    "JAVA_PKG_FORCE_ANT_TASKS", "JAVA_PKG_FORCE_COMPILER", "JAVA_PKG_FORCE_VM",
+    "JAVA_PKG_PORTAGE_DEP", "JAVA_PKG_WANT_BOOTCLASSPATH",
+    "JAVA_PKG_WANT_BUILD_VM", "JAVA_PKG_WANT_SOURCE", "JAVA_PKG_WANT_TARGET",
+    "JAVA_RM_FILES",
+
+    -- java-vm-2.eclass
+    "JAVA_VM_BUILD_ONLY", "JAVA_VM_CONFIG_DIR", "JAVA_VM_DIR", "JAVA_VM_SYSTEM",
+
+    -- kde4-base.eclass
+    "CMAKE_REQUIRED", "CPPUNIT_REQUIRED", "ESVN_MIRROR", "ESVN_PROJECT_SUFFIX",
+    "ESVN_UP_FREQ", "KDE_MINIMAL", "KDE_REQUIRED", "MULTIMEDIA_REQUIRED",
+    "OPENGL_REQUIRED", "QT_MINIMAL", "WEBKIT_REQUIRED",
+
+    -- kde4-functions.eclass
+    "KDEBASE", "KDE_DOC_DIRS", "KDE_LINGUAS", "KDE_LINGUAS_DIR",
+    "KDE_LIVE_SLOTS", "KDE_SLOTS",
+
+    -- kde4-meta.eclass
+    "KMCOMPILEONLY", "KMEXTRA", "KMEXTRACTONLY", "KMMODULE", "KMNAME",
+    "KMNOMODULE", "KMTARPARAMS",
+
+    -- l10n.eclass
+    "PLOCALES", "PLOCALE_BACKUP",
+
+    -- latex-package.eclass
+    "SUPPLIER",
+
+    -- leechcraft.eclass
+    "LEECHCRAFT_PLUGIN_CATEGORY",
+
+    -- linux-info.eclass
+    "CONFIG_CHECK", "KBUILD_OUTPUT", "KERNEL_DIR", "KV_DIR", "KV_EXTRA",
+    "KV_FULL", "KV_LOCAL", "KV_MAJOR", "KV_MINOR", "KV_OUT_DIR", "KV_PATCH",
+    "_LINUX_CONFIG_EXISTS_DONE",
+
+    -- linux-mod.eclass
+    "BUILD_PARAMS", "BUILD_TARGETS", "ECONF_PARAMS", "KV_OBJ",
+    "MODULES_OPTIONAL_USE", "MODULE_NAMES",
+
+    -- llvm.eclass
+    "LLVM_MAX_SLOT", "_LLVM_KNOWN_SLOTS",
+
+    -- mercurial.eclass
+    "EHG_CLONE_CMD", "EHG_OFFLINE", "EHG_PROJECT", "EHG_PULL_CMD", "EHG_QUIET",
+    "EHG_REPO_URI", "EHG_REVISION",
+
+    -- meson.eclass
+    "EMESON_SOURCE", "MESON_AUTO_DEPEND", "emesonargs",
+
+    -- mozlinguas.eclass
+    "MOZ_FTP_URI", "MOZ_LANGPACK_PREFIX", "MOZ_LANGPACK_SUFFIX", "MOZ_LANGS",
+    "MOZ_P", "MOZ_PN", "MOZ_PV",
+
+    -- multibuild.eclass
+    "MULTIBUILD_ID", "MULTIBUILD_VARIANT", "MULTIBUILD_VARIANTS",
+
+    -- multilib-build.eclass
+    "MULTILIB_ABI_FLAG", "MULTILIB_CHOST_TOOLS", "MULTILIB_COMPAT",
+    "MULTILIB_USEDEP", "MULTILIB_WRAPPED_HEADERS", "_MULTILIB_FLAGS",
+
+    -- myspell-r2.eclass
+    "MYSPELL_DICT", "MYSPELL_HYPH", "MYSPELL_THES",
+
+    -- mysql-multilib-r1.eclass
+    "MYSQL_CMAKE_EXTRA_DEFINES", "MYSQL_CMAKE_NATIVE_DEFINES",
+    "MYSQL_CMAKE_NONNATIVE_DEFINES", "MYSQL_EXTRAS_VER", "MYSQL_PV_MAJOR",
+    "MYSQL_VERSION_ID",
+
+    -- mysql-v2.eclass
+    "BUILD", "PERCONA_VER", "XTRADB_VER",
+
+    -- mysql.eclass
+    "MYSQL_COMMUNITY_FEATURES",
+
+    -- netsurf.eclass
+    "NETSURF_BUILDSYSTEM", "NETSURF_BUILDSYSTEM_SRC_URI",
+    "NETSURF_COMPONENT_TYPE", "netsurf_makeconf",
+
+    -- ninja-utils.eclass
+    "NINJAOPTS",
+
+    -- oasis.eclass
+    "OASIS_BUILD_DOCS", "OASIS_BUILD_TESTS", "OASIS_NO_DEBUG",
+
+    -- obs-download.eclass
+    "OBS_PACKAGE", "OBS_PROJECT", "OPENSUSE_RELEASE",
+
+    -- obs-service.eclass
+    "ADDITIONAL_FILES", "OBS_SERVICE_NAME",
+
+    -- office-ext-r1.eclass
+    "OFFICE_EXTENSIONS", "OFFICE_EXTENSIONS_LOCATION", "OFFICE_IMPLEMENTATIONS",
+    "OFFICE_REQ_USE",
+
+    -- office-ext.eclass
+    "OO_EXTENSIONS",
+
+    -- openib.eclass
+    "OFED_RC", "OFED_RC_VER", "OFED_SNAPSHOT", "OFED_SUFFIX", "OFED_VER",
+    "OFED_VERSIONS",
+
+    -- perl-module.eclass
+    "DIST_A", "DIST_AUTHOR", "DIST_A_EXT", "DIST_EXAMPLES", "DIST_NAME",
+    "DIST_SECTION", "DIST_TEST", "DIST_TEST_OVERRIDE", "DIST_VERSION",
+    "GENTOO_DEPEND_ON_PERL",
+
+    -- php-ext-base-r1.eclass
+    "PHP_EXT_INI", "PHP_EXT_NAME", "PHP_EXT_ZENDEXT",
+
+    -- php-ext-pecl-r1.eclass
+    "PHP_EXT_PECL_FILENAME", "PHP_EXT_PECL_PKG",
+
+    -- php-ext-source-r1.eclass
+    "PHP_EXT_SKIP_PHPIZE", "my_conf",
+
+    -- php-ext-source-r2.eclass
+    "PHP_EXT_OPTIONAL_USE", "PHP_EXT_S", "USE_PHP",
+
+    -- php-ezc.eclass
+    "EZC_BASE_MIN", "EZC_PV",
+
+    -- php-lib-r1.eclass
+    "PHP_LIB_NAME",
+
+    -- php-pear-r1.eclass
+    "PEAR_PV", "PHP_PEAR_PKG_NAME",
+
+    -- php5_2-sapi.eclass
+    "MY_PHP_P", "PHP_EXTRA_BRANDING", "PHP_PACKAGE", "PHP_PATCHSET_REV",
+    "SUHOSIN_PATCH",
+
+    -- platform.eclass
+    "PLATFORM_GYP_FILE", "PLATFORM_NATIVE_TEST", "PLATFORM_SUBDIR",
+    "WANT_LIBCHROME",
+
+    -- poppler.eclass
+    "POPPLER_MODULE", "POPPLER_MODULE_S",
+
+    -- python-any-r1.eclass
+    "PYTHON_COMPAT", "PYTHON_COMPAT_OVERRIDE", "PYTHON_DEPS", "PYTHON_REQ_USE",
+    "PYTHON_USEDEP",
+
+    -- python-distutils-ng.eclass
+    "PYTHON_DISABLE_COMPILATION", "PYTHON_DISABLE_SCRIPT_REDOS",
+    "PYTHON_OPTIONAL", "PYTHON_USE",
+
+    -- python-r1.eclass
+    "PYTHON_REQUIRED_USE",
+
+    -- python-utils-r1.eclass
+    "EPYTHON", "PYTHON", "PYTHON_CFLAGS", "PYTHON_COMPAT_NO_STRICT",
+    "PYTHON_CONFIG", "PYTHON_INCLUDEDIR", "PYTHON_LIBPATH", "PYTHON_LIBS",
+    "PYTHON_PKG_DEP", "PYTHON_SCRIPTDIR", "PYTHON_SITEDIR", "_PYTHON_ALL_IMPLS",
+
+    -- python.eclass
+    "PYTHON_COLORS", "PYTHON_DEPEND", "PYTHON_EXPORT_PHASE_FUNCTIONS",
+    "PYTHON_NONVERSIONED_EXECUTABLES", "PYTHON_TESTS_RESTRICTED_ABIS",
+    "PYTHON_TEST_VERBOSITY", "PYTHON_USE_WITH", "PYTHON_USE_WITH_OPT",
+    "PYTHON_USE_WITH_OR", "PYTHON_VERSIONED_EXECUTABLES",
+    "PYTHON_VERSIONED_SCRIPTS", "SUPPORT_PYTHON_ABIS",
+
+    -- qmake-utils.eclass
+    "EQMAKE4_EXCLUDE",
+
+    -- qt4-build.eclass
+    "QCONFIG_ADD", "QCONFIG_DEFINE", "QCONFIG_REMOVE",
+    "QT4_EXTRACT_DIRECTORIES", "QT4_TARGET_DIRECTORIES",
+
+    -- qt4-r2.eclass
+    "DOCSDIR", "LANGS", "LANGSLONG",
+
+    -- readme.gentoo-r1.eclass
+    "DISABLE_AUTOFORMATTING", "FORCE_PRINT_ELOG", "README_GENTOO_SUFFIX",
+
+    -- ruby-fakegem.eclass
+    "RUBY_FAKEGEM_BINWRAP", "RUBY_FAKEGEM_DOCDIR", "RUBY_FAKEGEM_DOC_SOURCES",
+    "RUBY_FAKEGEM_EXTRADOC", "RUBY_FAKEGEM_EXTRAINSTALL",
+    "RUBY_FAKEGEM_GEMSPEC", "RUBY_FAKEGEM_NAME", "RUBY_FAKEGEM_RECIPE_DOC",
+    "RUBY_FAKEGEM_RECIPE_TEST", "RUBY_FAKEGEM_REQUIRE_PATHS",
+    "RUBY_FAKEGEM_TASK_DOC", "RUBY_FAKEGEM_TASK_TEST", "RUBY_FAKEGEM_VERSION",
+
+    -- ruby-ng.eclass
+    "RUBY_OPTIONAL", "RUBY_PATCHES", "RUBY_QA_ALLOWED_LIBS", "RUBY_S",
+
+    -- ruby-single.eclass
+    "RUBY_DEPS",
+
+    -- ruby-utils.eclass
+    "RUBY_TARGETS_PREFERENCE",
+
+    -- scons-utils.eclass
+    "EXTRA_ESCONS", "SCONSOPTS", "SCONS_MIN_VERSION", "USE_SCONS_FALSE",
+    "USE_SCONS_TRUE", "myesconsargs",
+
+    -- subversion.eclass
+    "ESCM_LOGDIR", "ESVN_BOOTSTRAP", "ESVN_DISABLE_DEPENDENCIES",
+    "ESVN_FETCH_CMD", "ESVN_OFFLINE", "ESVN_OPTIONS", "ESVN_PASSWORD",
+    "ESVN_PATCHES", "ESVN_PROJECT", "ESVN_REPO_URI", "ESVN_RESTRICT",
+    "ESVN_REVISION", "ESVN_STORE_DIR", "ESVN_SWITCH_CMD", "ESVN_UMASK",
+    "ESVN_UPDATE_CMD", "ESVN_USER",
+
+    -- tast-bundle.eclass
+    "TAST_BUNDLE_EXTERNAL_DATA_URLS",
+
+    -- tegra-bct.eclass
+    "TEGRA_BCT_CHIP_FAMILY", "TEGRA_BCT_FLASH_CONFIG",
+    "TEGRA_BCT_ODM_DATA_CONFIG", "TEGRA_BCT_SDRAM_CONFIG",
+
+    -- texlive-module.eclass
+    "TEXLIVE_MODULE_BINSCRIPTS", "TEXLIVE_MODULE_CONTENTS",
+    "TEXLIVE_MODULE_DOC_CONTENTS", "TEXLIVE_MODULE_SRC_CONTENTS", "TL_PV",
+
+    -- twisted-r1.eclass
+    "TWISTED_P", "TWISTED_PLUGINS", "TWISTED_PN", "TWISTED_RELEASE",
+
+    -- unpacker.eclass
+    "UNPACKER_BZ2",
+
+    -- vala.eclass
+    "VALA_MAX_API_VERSION", "VALA_MIN_API_VERSION", "VALA_USE_DEPEND",
+
+    -- virtuoso.eclass
+    "VOS_EXTRACT",
+
+    -- waf-utils.eclass
+    "NO_WAF_LIBDIR", "WAF_BINARY", "WAF_VERBOSE",
+
+    -- webapp.eclass
+    "WEBAPP_DEPEND", "WEBAPP_NO_AUTO_INSTALL", "WEBAPP_OPTIONAL",
+
+    -- x-modular.eclass
+    "CONFIGURE_OPTIONS", "FONT_DIR", "MODULE", "SNAPSHOT", "XDIR",
+
+    -- xdg-utils.eclass
+    "DESKTOP_DATABASE_DIR", "DESKTOP_DATABASE_UPDATE_BIN",
+    "MIMEINFO_DATABASE_DIR", "MIMEINFO_DATABASE_UPDATE_BIN",
+
+    -- xemacs-elisp.eclass
+    "SIMPLE_ELISP",
+
+    -- xfconf.eclass
+    "EINTLTOOLIZE", "XFCONF",
+
+    -- xorg-2.eclass
+    "XORG_BASE_INDIVIDUAL_URI", "XORG_CONFIGURE_OPTIONS", "XORG_DOC",
+    "XORG_DRI", "XORG_EAUTORECONF", "XORG_MODULE", "XORG_MODULE_REBUILD",
+    "XORG_MULTILIB", "XORG_PACKAGE_NAME", "XORG_STATIC",
+
+    -- autotest.eclass declared incorrectly
+    "AUTOTEST_CLIENT_TESTS", "AUTOTEST_CLIENT_SITE_TESTS",
+    "AUTOTEST_SERVER_TESTS", "AUTOTEST_SERVER_SITE_TESTS", "AUTOTEST_CONFIG",
+    "AUTOTEST_DEPS", "AUTOTEST_PROFILERS", "AUTOTEST_CONFIG_LIST",
+    "AUTOTEST_DEPS_LIST", "AUTOTEST_PROFILERS_LIST",
+
+    -- cros-board.eclass declared incorrectly
+    "CROS_BOARDS",
+
+    -- Undeclared cros-kernel2 vars
+    "AFDO_PROFILE_VERSION",
+
+    -- haskell-cabal.eclass declared incorrectly
+    "CABAL_FEATURES",
+
+    -- Undeclared haskell-cabal.eclass vars
+    "CABAL_CORE_LIB_GHC_PV",
+
+    -- Undeclared readme.gentoo.eclass vars
+    "DOC_CONTENTS",
+
+    -- Backwards compatibility perl-module.eclass vars
+    "MODULE_AUTHOR", "MODULE_VERSION",
+
+    -- Undeclared perl-module.eclass vars
+    "mydoc",
+
+    -- python-utils-r1.eclass declared incorrectly
+    "RESTRICT_PYTHON_ABIS", "PYTHON_MODNAME"
   ]
 
 specialVariablesWithoutSpaces = [
