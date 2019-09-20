@@ -137,13 +137,19 @@ pScript s =
     }
   in runIdentity $ parseScript (mockedSystemInterface []) pSpec
 
+-- For testing. Tries to construct Parameters from a test script allowing for
+-- alterations to the AnalysisSpec.
+makeTestParams :: String -> (AnalysisSpec -> AnalysisSpec) -> Maybe Parameters
+makeTestParams s specModifier = do
+        let pr = pScript s
+        prRoot pr
+        let spec = specModifier $ defaultSpec pr
+        return $ makeParameters spec
+
 -- For testing. If parsed, returns whether there are any comments
 producesComments :: Checker -> String -> Maybe Bool
 producesComments c s = do
-        let pr = pScript s
-        prRoot pr
-        let spec = defaultSpec pr
-        let params = makeParameters spec
+        params <- makeTestParams s id
         return . not . null $ runChecker params c
 
 makeComment :: Severity -> Id -> Code -> String -> TokenComment

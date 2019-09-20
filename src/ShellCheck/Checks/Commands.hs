@@ -53,8 +53,23 @@ verifyNot f s = producesComments (getChecker [f]) s == Just False
 
 arguments (T_SimpleCommand _ _ (cmd:args)) = args
 
-commandChecks :: [CommandCheck]
-commandChecks = [
+verifyDisabledCheckerInPortage :: String -> Bool
+verifyDisabledCheckerInPortage s =
+    case maybeParams of
+        Just params -> null $ runChecker params $ checker params
+        Nothing     -> False
+    where
+        maybeParams = makeTestParams s (\spec -> spec { asIsPortageBuild = True })
+
+prop_commandChecksPortageWhich = verifyDisabledCheckerInPortage "which '.+'"
+
+commandCheckWhen :: Bool -> CommandCheck -> CommandCheck
+commandCheckWhen predicate commandCheck = if predicate
+                                          then commandCheck
+                                          else CommandCheck (Exactly "skipped") nullCheck
+
+commandChecks :: Parameters -> [CommandCheck]
+commandChecks params = [
     checkTr
     ,checkFindNameGlob
     ,checkNeedlessExpr
@@ -90,7 +105,7 @@ commandChecks = [
     ,checkMvArguments, checkCpArguments, checkLnArguments
     ,checkFindRedirections
     ,checkReadExpansions
-    ,checkWhich
+    ,commandCheckWhen (not $ isPortageBuild params) checkWhich
     ,checkSudoRedirect
     ,checkSudoArgs
     ,checkSourceArgs
@@ -129,7 +144,7 @@ getChecker list = Checker {
 
 
 checker :: Parameters -> Checker
-checker params = getChecker commandChecks
+checker = getChecker . commandChecks
 
 prop_checkTr1 = verify checkTr "tr [a-f] [A-F]"
 prop_checkTr2 = verify checkTr "tr 'a-z' 'A-Z'"
