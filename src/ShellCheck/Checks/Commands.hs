@@ -92,7 +92,7 @@ commandChecks params = [
     ,checkAliasesUsesArgs
     ,checkAliasesExpandEarly
     ,checkUnsetGlobs
-    ,checkFindWithoutPath
+    ,commandCheckWhen (not $ isPortageBuild params) checkFindWithoutPath
     ,checkTimeParameters
     ,checkTimedCommand
     ,checkLocalScope
@@ -758,6 +758,7 @@ prop_checkFindWithoutPath5 = verifyNot checkFindWithoutPath "find -O3 ."
 prop_checkFindWithoutPath6 = verifyNot checkFindWithoutPath "find -D exec ."
 prop_checkFindWithoutPath7 = verifyNot checkFindWithoutPath "find --help"
 prop_checkFindWithoutPath8 = verifyNot checkFindWithoutPath "find -Hx . -print"
+prop_checkFindWithoutPathPortage = verifyDisabledCheckerInPortage "find -type f"
 checkFindWithoutPath = CommandCheck (Basename "find") f
   where
     f t@(T_SimpleCommand _ _ (cmd:args)) =
