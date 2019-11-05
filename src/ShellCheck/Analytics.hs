@@ -935,6 +935,7 @@ prop_checkSingleQuotedVariables16= verify checkSingleQuotedVariables "git '$a'"
 prop_checkSingleQuotedVariables17= verifyNot checkSingleQuotedVariables "rename 's/(.)a/$1/g' *"
 prop_checkSingleQuotedVariables18= verifyNot checkSingleQuotedVariables "echo '``'"
 prop_checkSingleQuotedVariables19= verifyNot checkSingleQuotedVariables "echo '```'"
+prop_checkSingleQuotedVariables20= verifyNot checkSingleQuotedVariables "python_gen_any_dep 'dev-python/pyyaml[${PYTHON_USEDEP}]'"
 
 checkSingleQuotedVariables params t@(T_SingleQuoted id s) =
     when (s `matches` re) $
@@ -969,6 +970,7 @@ checkSingleQuotedVariables params t@(T_SingleQuoted id s) =
                 ,"rename"
                 ,"unset"
                 ,"git filter-branch"
+                ,"python_gen_any_dep"
                 ]
             || "awk" `isSuffixOf` commandName
             || "perl" `isPrefixOf` commandName
