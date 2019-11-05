@@ -63,6 +63,7 @@ treeChecks = [
     ,checkUncheckedCdPushdPopd
     ,checkArrayAssignmentIndices
     ,checkUseBeforeDefinition
+    ,checkForStableKeywordsin9999CrosWorkonEbuilds
     ]
 
 runAnalytics :: AnalysisSpec -> [TokenComment]
@@ -1838,6 +1839,42 @@ checkVerboseSpacefulness params = checkSpacefulness' onFind params
             tell [makeCommentWithFix StyleC (getId token) 2248
                     "Prefer double quoting even when variables don't contain special characters."
                     (addDoubleQuotesAround params token)]
+
+getInheritedEclasses :: Token -> [String]
+getInheritedEclasses root = execWriter $ doAnalysis findInheritedEclasses root
+  where
+    findInheritedEclasses cmd
+        | cmd `isCommand` "inherit" = tell $ catMaybes $ getLiteralString <$> (arguments cmd)
+    findInheritedEclasses _ = return ()
+
+checkForStableKeywordsin9999CrosWorkonEbuilds :: Parameters -> Token -> [TokenComment]
+checkForStableKeywordsin9999CrosWorkonEbuilds params root =
+  if isPortage9999Ebuild params && "cros-workon" `elem` getInheritedEclasses root
+  then ensureNoStableKeywords root
+  else []
+
+prop_checkEnsureNoStableKeywords1 = verifyNotTree (const ensureNoStableKeywords) "KEYWORDS=\"~*\""
+prop_checkEnsureNoStableKeywords2 = verifyNotTree (const ensureNoStableKeywords) "KEYWORDS=\"-* ~amd64\""
+prop_checkEnsureNoStableKeywords3 = verifyTree (const ensureNoStableKeywords) "KEYWORDS=\"*\""
+prop_checkEnsureNoStableKeywords4 = verifyTree (const ensureNoStableKeywords) "KEYWORDS=\"-* amd64\""
+ensureNoStableKeywords :: Token -> [TokenComment]
+ensureNoStableKeywords root =
+  execWriter $ doAnalysis warnStableKeywords root
+
+-- warnStableKeywords will emit an error if any KEYWORDS listed in the .ebuild
+-- file are marked as stable. In practice, this means that there are any
+-- KEYWORDS that do not begin with - or ~.
+warnStableKeywords :: Token -> Writer [TokenComment] ()
+warnStableKeywords (T_Assignment _ Assign "KEYWORDS" []
+                    (T_NormalWord _ [T_DoubleQuoted id [(T_Literal _ keywords)]]))
+  | any isStableKeyword (words keywords) =
+    tell [makeComment ErrorC id 3000 $
+      "All KEYWORDS in -9999.ebuild files inheriting from cros-workon must " ++
+      "be marked as unstable (~*, ~amd64, etc...), or broken (-*, -amd64, etc...)."]
+warnStableKeywords _ = return ()
+
+isStableKeyword :: String -> Bool
+isStableKeyword k = not (("~" `isPrefixOf` k) || ("-" `isPrefixOf` k))
 
 addDoubleQuotesAround params token = (surroundWidth (getId token) params "\"")
 checkSpacefulness'

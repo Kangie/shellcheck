@@ -100,6 +100,9 @@ data Parameters = Parameters {
 isPortageBuild :: Parameters -> Bool
 isPortageBuild params = portageFileType params /= NonPortageRelated
 
+isPortage9999Ebuild :: Parameters -> Bool
+isPortage9999Ebuild params = portageFileType params == Ebuild { is9999Ebuild = True }
+
 -- TODO: Cache results of common AST ops here
 data Cache = Cache {}
 

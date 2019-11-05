@@ -51,8 +51,6 @@ verify :: CommandCheck -> String -> Bool
 verify f s = producesComments (getChecker [f]) s == Just True
 verifyNot f s = producesComments (getChecker [f]) s == Just False
 
-arguments (T_SimpleCommand _ _ (cmd:args)) = args
-
 verifyDisabledCheckerInPortage :: String -> Bool
 verifyDisabledCheckerInPortage = verifyDisabledCheckerInPortage2 $
                                    Ebuild { is9999Ebuild = True }
