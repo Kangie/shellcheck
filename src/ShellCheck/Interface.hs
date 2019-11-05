@@ -25,7 +25,7 @@ module ShellCheck.Interface
     , CheckResult(crFilename, crComments)
     , ParseSpec(psFilename, psScript, psCheckSourced, psIgnoreRC, psShellTypeOverride)
     , ParseResult(prComments, prTokenPositions, prRoot)
-    , AnalysisSpec(asScript, asShellType, asFallbackShell, asExecutionMode, asCheckSourced, asTokenPositions, asOptionalChecks, asIsPortageBuild)
+    , AnalysisSpec(asScript, asShellType, asFallbackShell, asExecutionMode, asCheckSourced, asTokenPositions, asOptionalChecks, asPortageFileType)
     , AnalysisResult(arComments)
     , FormatterOptions(foColorOption, foWikiLinkCount)
     , Shell(Ksh, Sh, Bash, Dash)
@@ -58,6 +58,8 @@ module ShellCheck.Interface
     , newReplacement
     , CheckDescription(cdName, cdDescription, cdPositive, cdNegative)
     , newCheckDescription
+    , PortageFileType(NonPortageRelated, Ebuild, is9999Ebuild, Eclass)
+    , getPortageFileType
     ) where
 
 import ShellCheck.AST
@@ -153,6 +155,20 @@ newParseResult = ParseResult {
     prRoot = Nothing
 }
 
+data PortageFileType = NonPortageRelated
+                       | Ebuild { is9999Ebuild :: Bool }
+                       | Eclass deriving (Show, Eq)
+
+getPortageFileType :: String -> PortageFileType
+getPortageFileType filename
+    | ".ebuild" `isSuffixOf` filename = ebuildType
+    | ".eclass" `isSuffixOf` filename = Eclass
+    | otherwise                       = NonPortageRelated
+  where
+    ebuildType = Ebuild {
+      is9999Ebuild = "-9999.ebuild" `isSuffixOf` filename
+    }
+
 -- Analyzer input and output
 data AnalysisSpec = AnalysisSpec {
     asScript :: Token,
@@ -162,7 +178,7 @@ data AnalysisSpec = AnalysisSpec {
     asCheckSourced :: Bool,
     asOptionalChecks :: [String],
     asTokenPositions :: Map.Map Id (Position, Position),
-    asIsPortageBuild :: Bool
+    asPortageFileType :: PortageFileType
 }
 
 newAnalysisSpec token = AnalysisSpec {
@@ -173,7 +189,7 @@ newAnalysisSpec token = AnalysisSpec {
     asCheckSourced = False,
     asOptionalChecks = [],
     asTokenPositions = Map.empty,
-    asIsPortageBuild = False
+    asPortageFileType = NonPortageRelated
 }
 
 newtype AnalysisResult = AnalysisResult {
