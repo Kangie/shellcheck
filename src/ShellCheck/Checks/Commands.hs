@@ -54,12 +54,19 @@ verifyNot f s = producesComments (getChecker [f]) s == Just False
 arguments (T_SimpleCommand _ _ (cmd:args)) = args
 
 verifyDisabledCheckerInPortage :: String -> Bool
-verifyDisabledCheckerInPortage s =
+verifyDisabledCheckerInPortage = verifyDisabledCheckerInPortage2 $
+                                   Ebuild { is9999Ebuild = True }
+
+verifyDisabledCheckerInPortage2 :: PortageFileType -> String -> Bool
+verifyDisabledCheckerInPortage2 portageFileType s =
     case maybeParams of
         Just params -> null $ runChecker params $ checker params
         Nothing     -> False
     where
-        maybeParams = makeTestParams s (\spec -> spec { asIsPortageBuild = True })
+      maybeParams = makeTestParams s $
+        \spec -> spec {
+           asPortageFileType = portageFileType
+        }
 
 prop_commandChecksPortageWhich = verifyDisabledCheckerInPortage "which '.+'"
 

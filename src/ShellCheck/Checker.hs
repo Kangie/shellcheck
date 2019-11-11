@@ -61,10 +61,6 @@ shellFromFilename filename = foldl mplus Nothing candidates
     candidates =
         map (\(ext,sh) -> if ext `isSuffixOf` filename then Just sh else Nothing) shellExtensions
 
-isPortageBuildFile filename = any (\x -> isSuffixOf x filename) portageExtensions
-  where
-    portageExtensions = [".ebuild", ".eclass"]
-
 checkScript :: Monad m => SystemInterface m -> CheckSpec -> m CheckResult
 checkScript sys spec = do
     results <- checkScript (csScript spec)
@@ -92,7 +88,7 @@ checkScript sys spec = do
                     asExecutionMode = Executed,
                     asTokenPositions = tokenPositions,
                     asOptionalChecks = csOptionalChecks spec,
-                    asIsPortageBuild = isPortageBuildFile $ csFilename spec
+                    asPortageFileType = getPortageFileType $ csFilename spec
                 } where as = newAnalysisSpec root
         let analysisMessages =
                 fromMaybe [] $

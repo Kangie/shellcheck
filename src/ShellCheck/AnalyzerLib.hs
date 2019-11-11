@@ -93,9 +93,12 @@ data Parameters = Parameters {
     rootNode           :: Token,
     -- map from token id to start and end position
     tokenPositions     :: Map.Map Id (Position, Position),
-    -- True if script is being used as a portage build file
-    isPortageBuild     :: Bool
+    -- detailed type of any Portage related file
+    portageFileType    :: PortageFileType
     } deriving (Show)
+
+isPortageBuild :: Parameters -> Bool
+isPortageBuild params = portageFileType params /= NonPortageRelated
 
 -- TODO: Cache results of common AST ops here
 data Cache = Cache {}
@@ -204,7 +207,7 @@ makeParameters spec =
         parentMap = getParentTree root,
         variableFlow = getVariableFlow params root,
         tokenPositions = asTokenPositions spec,
-        isPortageBuild = asIsPortageBuild spec
+        portageFileType = asPortageFileType spec
     } in params
   where root = asScript spec
 
