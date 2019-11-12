@@ -936,6 +936,8 @@ prop_checkSingleQuotedVariables17= verifyNot checkSingleQuotedVariables "rename 
 prop_checkSingleQuotedVariables18= verifyNot checkSingleQuotedVariables "echo '``'"
 prop_checkSingleQuotedVariables19= verifyNot checkSingleQuotedVariables "echo '```'"
 prop_checkSingleQuotedVariables20= verifyNot checkSingleQuotedVariables "python_gen_any_dep 'dev-python/pyyaml[${PYTHON_USEDEP}]'"
+prop_checkSingleQuotedVariables21= verifyNot checkSingleQuotedVariables "python_gen_cond_dep 'dev-python/unittest2[${PYTHON_USEDEP}]' python2_7 pypy"
+prop_checkSingleQuotedVariables22= verifyNot checkSingleQuotedVariables "version_format_string '${PN}_source_$1_$2-$3_$4'"
 
 checkSingleQuotedVariables params t@(T_SingleQuoted id s) =
     when (s `matches` re) $
@@ -971,6 +973,8 @@ checkSingleQuotedVariables params t@(T_SingleQuoted id s) =
                 ,"unset"
                 ,"git filter-branch"
                 ,"python_gen_any_dep"
+                ,"python_gen_cond_dep"
+                ,"version_format_string"
                 ]
             || "awk" `isSuffixOf` commandName
             || "perl" `isPrefixOf` commandName
