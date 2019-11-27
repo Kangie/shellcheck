@@ -437,6 +437,7 @@ readConditionContents single =
     readCondContents `attempting` lookAhead (do
                                 pos <- getPosition
                                 s <- readVariableName
+                                spacing1
                                 when (s `elem` commonCommands) $
                                     parseProblemAt pos WarningC 1014 "Use 'if cmd; then ..' to check exit code, or 'if [[ $(cmd) == .. ]]' to check output.")
 
@@ -910,6 +911,8 @@ prop_readCondition20 = isOk readCondition "[[ echo_rc -eq 0 ]]"
 prop_readCondition21 = isOk readCondition "[[ $1 =~ ^(a\\ b)$ ]]"
 prop_readCondition22 = isOk readCondition "[[ $1 =~ \\.a\\.(\\.b\\.)\\.c\\. ]]"
 prop_readCondition23 = isOk readCondition "[[ -v arr[$var] ]]"
+prop_readCondition24 = isWarning readCondition "[[ 1 == 2 ]]]"
+prop_readCondition25 = isOk readCondition "[[ lex.yy.c -ot program.l ]]"
 readCondition = called "test expression" $ do
     opos <- getPosition
     start <- startSpan
@@ -938,6 +941,11 @@ readCondition = called "test expression" $ do
     id <- endSpan start
     when (open == "[[" && close /= "]]") $ parseProblemAt cpos ErrorC 1033 "Did you mean ]] ?"
     when (open == "[" && close /= "]" ) $ parseProblemAt opos ErrorC 1034 "Did you mean [[ ?"
+    optional $ lookAhead $ do
+        pos <- getPosition
+        notFollowedBy2 readCmdWord <|>
+            parseProblemAt pos ErrorC 1136
+                ("Unexpected characters after terminating " ++ close ++ ". Missing semicolon/linefeed?")
     spacing
     many readCmdWord -- Read and throw away remainders to get then/do warnings. Fixme?
     return $ T_Condition id typ condition
@@ -1733,6 +1741,7 @@ prop_readHereDoc14= isWarning readScript "cat << foo\nbar\nfoo \n"
 prop_readHereDoc15= isWarning readScript "cat <<foo\nbar\nfoo bar\nfoo"
 prop_readHereDoc16= isOk readScript "cat <<- ' foo'\nbar\n foo\n"
 prop_readHereDoc17= isWarning readScript "cat <<- ' foo'\nbar\n  foo\n foo\n"
+prop_readHereDoc18= isOk readScript "cat <<'\"foo'\nbar\n\"foo\n"
 prop_readHereDoc20= isWarning readScript "cat << foo\n  foo\n()\nfoo\n"
 prop_readHereDoc21= isOk readScript "# shellcheck disable=SC1039\ncat << foo\n  foo\n()\nfoo\n"
 readHereDoc = called "here document" $ do
@@ -1753,14 +1762,17 @@ readHereDoc = called "here document" $ do
     addPendingHereDoc doc
     return doc
   where
-    quotes = "\"'\\"
+    unquote :: String -> (Quoted, String)
+    unquote "" = (Unquoted, "")
+    unquote [c] = (Unquoted, [c])
+    unquote s@(cl:tl) =
+      case reverse tl of
+        (cr:tr) | cr == cl && cl `elem` "\"'" -> (Quoted, reverse tr)
+        _ -> (if '\\' `elem` s then (Quoted, filter ((/=) '\\') s) else (Unquoted, s))
     -- Fun fact: bash considers << foo"" quoted, but not << <("foo").
-    -- Instead of replicating this, just read a token and strip quotes.
     readToken = do
         str <- readStringForParser readNormalWord
-        return (if any (`elem` quotes) str then Quoted else Unquoted,
-                filter (not . (`elem` quotes)) str)
-
+        return $ unquote str
 
 readPendingHereDocs = do
     docs <- popPendingHereDocs
@@ -2442,6 +2454,7 @@ readDoGroup kwId = do
 
 
 prop_readForClause = isOk readForClause "for f in *; do rm \"$f\"; done"
+prop_readForClause1 = isOk readForClause "for f in *; { rm \"$f\"; }"
 prop_readForClause3 = isOk readForClause "for f; do foo; done"
 prop_readForClause4 = isOk readForClause "for((i=0; i<10; i++)); do echo $i; done"
 prop_readForClause5 = isOk readForClause "for ((i=0;i<10 && n>x;i++,--n))\ndo \necho $i\ndone"
@@ -2481,7 +2494,7 @@ readForClause = called "for loop" $ do
             "Don't use $ on the iterator name in for loops."
         name <- readVariableName `thenSkip` allspacing
         values <- readInClause <|> (optional readSequentialSep >> return [])
-        group <- readDoGroup id
+        group <- readBraced <|> readDoGroup id
         return $ T_ForIn id name values group
 
 prop_readSelectClause1 = isOk readSelectClause "select foo in *; do echo $foo; done"
@@ -3425,4 +3438,3 @@ tryWithErrors parser = do
 
 return []
 runTests = $quickCheckAll
-

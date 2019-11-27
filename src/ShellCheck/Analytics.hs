@@ -33,7 +33,7 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
-import Control.Monad.Writer
+import Control.Monad.Writer hiding ((<>))
 import Control.Monad.Reader
 import Data.Char
 import Data.Functor
@@ -41,6 +41,7 @@ import Data.Function (on)
 import Data.List
 import Data.Maybe
 import Data.Ord
+import Data.Semigroup
 import Debug.Trace
 import qualified Data.Map.Strict as Map
 import Test.QuickCheck.All (forAllProperties)
@@ -126,6 +127,7 @@ nodeChecks = [
     ,checkArithmeticDeref
     ,checkArithmeticBadOctal
     ,checkComparisonAgainstGlob
+    ,checkCaseAgainstGlob
     ,checkCommarrays
     ,checkOrNeq
     ,checkEchoWc
@@ -192,6 +194,7 @@ nodeChecks = [
     ,checkRedirectionToCommand
     ,checkDollarQuoteParen
     ,checkUselessBang
+    ,checkTranslatedStringVariable
     ]
 
 optionalChecks = map fst optionalTreeChecks
@@ -1031,6 +1034,7 @@ prop_checkNumberComparisons12 = verify checkNumberComparisons "[ x$foo -gt x${N}
 prop_checkNumberComparisons13 = verify checkNumberComparisons "[ $foo > $bar ]"
 prop_checkNumberComparisons14 = verifyNot checkNumberComparisons "[[ foo < bar ]]"
 prop_checkNumberComparisons15 = verifyNot checkNumberComparisons "[ $foo '>' $bar ]"
+prop_checkNumberComparisons16 = verify checkNumberComparisons "[ foo -eq 'y' ]"
 checkNumberComparisons params (TC_Binary id typ op lhs rhs) = do
     if isNum lhs || isNum rhs
       then do
@@ -1054,7 +1058,7 @@ checkNumberComparisons params (TC_Binary id typ op lhs rhs) = do
                 Dash -> err id 2073 $ "Escape \\" ++ op ++ " to prevent it redirecting."
                 _ -> err id 2073 $ "Escape \\" ++ op ++ " to prevent it redirecting (or switch to [[ .. ]])."
 
-    when (op `elem` ["-lt", "-gt", "-le", "-ge", "-eq"]) $ do
+    when (op `elem` arithmeticBinaryTestOps) $ do
         mapM_ checkDecimals [lhs, rhs]
         when (typ == SingleBracket) $
             checkStrings [lhs, rhs]
@@ -1203,7 +1207,7 @@ checkConstantIfs _ (TC_Binary id typ op lhs rhs) | not isDynamic =
         else checkUnmatchable id op lhs rhs
   where
     isDynamic =
-        op `elem` [ "-lt", "-gt", "-le", "-ge", "-eq", "-ne" ]
+        op `elem` arithmeticBinaryTestOps
             && typ == DoubleBracket
         || op `elem` [ "-nt", "-ot", "-ef"]
 
@@ -1348,6 +1352,21 @@ checkComparisonAgainstGlob params (TC_Binary _ SingleBracket op _ word)
             else "[ .. ] can't match globs. Use a case statement."
 
 checkComparisonAgainstGlob _ _ = return ()
+
+prop_checkCaseAgainstGlob1 = verify checkCaseAgainstGlob "case foo in lol$n) foo;; esac"
+prop_checkCaseAgainstGlob2 = verify checkCaseAgainstGlob "case foo in $(foo)) foo;; esac"
+prop_checkCaseAgainstGlob3 = verifyNot checkCaseAgainstGlob "case foo in *$bar*) foo;; esac"
+checkCaseAgainstGlob _ t =
+    case t of
+        (T_CaseExpression _ _ cases) -> mapM_ check cases
+        _ -> return ()
+  where
+    check (_, list, _) = mapM_ check' list
+    check' expr@(T_NormalWord _ list)
+        -- If it's already a glob, assume that's what the user wanted
+        | not (isGlob expr) && any isQuoteableExpansion list =
+            warn (getId expr) 2254 "Quote expansions in case patterns to match literally rather than as a glob."
+    check' _ = return ()
 
 prop_checkCommarrays1 = verify checkCommarrays "a=(1, 2)"
 prop_checkCommarrays2 = verify checkCommarrays "a+=(1,2,3)"
@@ -1801,6 +1820,22 @@ prop_checkSpacefulness35= verifyNotTree checkSpacefulness "echo ${1+\"$1\"}"
 prop_checkSpacefulness36= verifyNotTree checkSpacefulness "arg=$#; echo $arg"
 prop_checkSpacefulness37= verifyNotTree checkSpacefulness "@test 'status' {\n [ $status -eq 0 ]\n}"
 prop_checkSpacefulness37v = verifyTree checkVerboseSpacefulness "@test 'status' {\n [ $status -eq 0 ]\n}"
+prop_checkSpacefulness38= verifyTree checkSpacefulness "a=; echo $a"
+prop_checkSpacefulness39= verifyNotTree checkSpacefulness "a=''\"\"''; b=x$a; echo $b"
+prop_checkSpacefulness40= verifyNotTree checkSpacefulness "a=$((x+1)); echo $a"
+
+data SpaceStatus = SpaceSome | SpaceNone | SpaceEmpty deriving (Eq)
+instance Semigroup SpaceStatus where
+  (<>) x y =
+    case (x,y) of
+        (SpaceNone, SpaceNone) -> SpaceNone
+        (SpaceSome, _) -> SpaceSome
+        (_, SpaceSome) -> SpaceSome
+        (SpaceEmpty, x) -> x
+        (x, SpaceEmpty) -> x
+instance Monoid SpaceStatus where
+    mempty = SpaceEmpty
+    mappend = (<>)
 
 -- This is slightly awkward because we want to support structured
 -- optional checks based on nearly the same logic
@@ -1808,7 +1843,7 @@ checkSpacefulness params = checkSpacefulness' onFind params
   where
     emit x = tell [x]
     onFind spaces token _ =
-        when spaces $
+        when (spaces /= SpaceNone) $
             if isDefaultAssignment (parentMap params) token
             then
                 emit $ makeComment InfoC (getId token) 2223
@@ -1835,7 +1870,7 @@ prop_checkSpacefulness36v = verifyTree checkVerboseSpacefulness "arg=$#; echo $a
 checkVerboseSpacefulness params = checkSpacefulness' onFind params
   where
     onFind spaces token name =
-        when (not spaces && name `notElem` specialVariablesWithoutSpaces) $
+        when (spaces == SpaceNone && name `notElem` specialVariablesWithoutSpaces) $
             tell [makeCommentWithFix StyleC (getId token) 2248
                     "Prefer double quoting even when variables don't contain special characters."
                     (addDoubleQuotesAround params token)]
@@ -1878,17 +1913,17 @@ isStableKeyword k = not (("~" `isPrefixOf` k) || ("-" `isPrefixOf` k))
 
 addDoubleQuotesAround params token = (surroundWidth (getId token) params "\"")
 checkSpacefulness'
-    :: (Bool -> Token -> String -> Writer [TokenComment] ()) ->
+    :: (SpaceStatus -> Token -> String -> Writer [TokenComment] ()) ->
             Parameters -> Token -> [TokenComment]
 checkSpacefulness' onFind params t =
     doVariableFlowAnalysis readF writeF (Map.fromList defaults) (variableFlow params)
   where
-    defaults = zip (variablesWithoutSpaces params) (repeat False)
+    defaults = zip (variablesWithoutSpaces params) (repeat SpaceNone)
 
-    hasSpaces name = gets (Map.findWithDefault True name)
+    hasSpaces name = gets (Map.findWithDefault SpaceSome name)
 
-    setSpaces name bool =
-        modify $ Map.insert name bool
+    setSpaces name status =
+        modify $ Map.insert name status
 
     readF _ token name = do
         spaces <- hasSpaces name
@@ -1905,13 +1940,13 @@ checkSpacefulness' onFind params t =
       where
         emit x = tell [x]
 
-    writeF _ _ name (DataString SourceExternal) = setSpaces name True >> return []
-    writeF _ _ name (DataString SourceInteger) = setSpaces name False >> return []
+    writeF _ _ name (DataString SourceExternal) = setSpaces name SpaceSome >> return []
+    writeF _ _ name (DataString SourceInteger) = setSpaces name SpaceNone >> return []
 
     writeF _ _ name (DataString (SourceFrom vals)) = do
         map <- get
         setSpaces name
-            (isSpacefulWord (\x -> Map.findWithDefault True x map) vals)
+            (isSpacefulWord (\x -> Map.findWithDefault SpaceSome x map) vals)
         return []
 
     writeF _ _ _ _ = return []
@@ -1923,24 +1958,28 @@ checkSpacefulness' onFind params t =
             (T_DollarBraced _ _ _ ) -> True
             _ -> False
 
-    isSpacefulWord :: (String -> Bool) -> [Token] -> Bool
-    isSpacefulWord f = any (isSpaceful f)
-    isSpaceful :: (String -> Bool) -> Token -> Bool
+    isSpacefulWord :: (String -> SpaceStatus) -> [Token] -> SpaceStatus
+    isSpacefulWord f = mconcat . map (isSpaceful f)
+    isSpaceful :: (String -> SpaceStatus) -> Token -> SpaceStatus
     isSpaceful spacefulF x =
         case x of
-          T_DollarExpansion _ _ -> True
-          T_Backticked _ _ -> True
-          T_Glob _ _         -> True
-          T_Extglob {}       -> True
-          T_Literal _ s      -> s `containsAny` globspace
-          T_SingleQuoted _ s -> s `containsAny` globspace
+          T_DollarExpansion _ _ -> SpaceSome
+          T_Backticked _ _ -> SpaceSome
+          T_Glob _ _         -> SpaceSome
+          T_Extglob {}       -> SpaceSome
+          T_DollarArithmetic _ _ -> SpaceNone
+          T_Literal _ s      -> fromLiteral s
+          T_SingleQuoted _ s -> fromLiteral s
           T_DollarBraced _ _ _ -> spacefulF $ getBracedReference $ bracedString x
           T_NormalWord _ w   -> isSpacefulWord spacefulF w
           T_DoubleQuoted _ w -> isSpacefulWord spacefulF w
-          _ -> False
+          _ -> SpaceEmpty
       where
         globspace = "*?[] \t\n"
         containsAny s = any (`elem` s)
+        fromLiteral "" = SpaceEmpty
+        fromLiteral s | s `containsAny` globspace = SpaceSome
+        fromLiteral _ = SpaceNone
 
 prop_CheckVariableBraces1 = verify checkVariableBraces "a='123'; echo $a"
 prop_CheckVariableBraces2 = verifyNot checkVariableBraces "a='123'; echo ${a}"
@@ -2381,6 +2420,7 @@ prop_checkCharRangeGlob2 = verifyNot checkCharRangeGlob "ls *[[:digit:]].jpg"
 prop_checkCharRangeGlob3 = verify checkCharRangeGlob "ls [10-15]"
 prop_checkCharRangeGlob4 = verifyNot checkCharRangeGlob "ls [a-zA-Z]"
 prop_checkCharRangeGlob5 = verifyNot checkCharRangeGlob "tr -d [a-zA-Z]" -- tr has 2060
+prop_checkCharRangeGlob6 = verifyNot checkCharRangeGlob "[[ $x == [!!]* ]]"
 checkCharRangeGlob p t@(T_Glob id str) |
   isCharClass str && not (isParamTo (parentMap p) "tr" t) =
     if ":" `isPrefixOf` contents
@@ -2392,8 +2432,13 @@ checkCharRangeGlob p t@(T_Glob id str) |
             info id 2102 "Ranges can only match single chars (mentioned due to duplicates)."
   where
     isCharClass str = "[" `isPrefixOf` str && "]" `isSuffixOf` str
-    contents = drop 1 . take (length str - 1) $ str
+    contents = dropNegation . drop 1 . take (length str - 1) $ str
     hasDupes = any (>1) . map length . group . sort . filter (/= '-') $ contents
+    dropNegation s =
+        case s of
+            '!':rest -> rest
+            '^':rest -> rest
+            x -> x
 checkCharRangeGlob _ _ = return ()
 
 
@@ -2734,6 +2779,9 @@ prop_checkTestArgumentSplitting15 = verifyNot checkTestArgumentSplitting "[[ \"$
 prop_checkTestArgumentSplitting16 = verifyNot checkTestArgumentSplitting "[[ -v foo[123] ]]"
 prop_checkTestArgumentSplitting17 = verifyNot checkTestArgumentSplitting "#!/bin/ksh\n[ -e foo* ]"
 prop_checkTestArgumentSplitting18 = verify checkTestArgumentSplitting "#!/bin/ksh\n[ -d foo* ]"
+prop_checkTestArgumentSplitting19 = verifyNot checkTestArgumentSplitting "[[ var[x] -eq 2*3 ]]"
+prop_checkTestArgumentSplitting20 = verify checkTestArgumentSplitting "[ var[x] -eq 2 ]"
+prop_checkTestArgumentSplitting21 = verify checkTestArgumentSplitting "[ 6 -eq 2*3 ]"
 checkTestArgumentSplitting :: Parameters -> Token -> Writer [TokenComment] ()
 checkTestArgumentSplitting params t =
     case t of
@@ -2762,6 +2810,18 @@ checkTestArgumentSplitting params t =
                 checkArrays typ token
 
         (TC_Unary _ typ op token) -> checkAll typ token
+
+        (TC_Binary _ typ op lhs rhs) | op `elem` arithmeticBinaryTestOps ->
+            if typ == DoubleBracket
+            then
+                mapM_ (\c -> do
+                        checkArrays typ c
+                        checkBraces typ c) [lhs, rhs]
+            else
+                mapM_ (\c -> do
+                        checkNumericalGlob typ c
+                        checkArrays typ c
+                        checkBraces typ c) [lhs, rhs]
 
         (TC_Binary _ typ op lhs rhs) ->
             if op `elem` ["=", "==", "!=", "=~"]
@@ -2795,6 +2855,11 @@ checkTestArgumentSplitting params t =
             then warn (getId token) 2202 "Globs don't work as operands in [ ]. Use a loop."
             else err (getId token) 2203 "Globs are ignored in [[ ]] except right of =/!=. Use a loop."
 
+    checkNumericalGlob SingleBracket token =
+        -- var[x] and x*2 look like globs
+        when (shellType params /= Ksh && isGlob token) $
+            err (getId token) 2255 "[ ] does not apply arithmetic evaluation. Evaluate with $((..)) for numbers, or use string comparator for strings."
+
 
 prop_checkMaskedReturns1 = verify checkMaskedReturns "f() { local a=$(false); }"
 prop_checkMaskedReturns2 = verify checkMaskedReturns "declare a=$(false)"
@@ -2821,9 +2886,21 @@ checkMaskedReturns _ _ = return ()
 
 prop_checkReadWithoutR1 = verify checkReadWithoutR "read -a foo"
 prop_checkReadWithoutR2 = verifyNot checkReadWithoutR "read -ar foo"
+prop_checkReadWithoutR3 = verifyNot checkReadWithoutR "read -t 0"
+prop_checkReadWithoutR4 = verifyNot checkReadWithoutR "read -t 0 && read --d '' -r bar"
+prop_checkReadWithoutR5 = verifyNot checkReadWithoutR "read -t 0 foo < file.txt"
+prop_checkReadWithoutR6 = verifyNot checkReadWithoutR "read -u 3 -t 0"
 checkReadWithoutR _ t@T_SimpleCommand {} | t `isUnqualifiedCommand` "read" =
-    unless ("r" `elem` map snd (getAllFlags t)) $
+    unless ("r" `elem` map snd flags || has_t0) $
         info (getId $ getCommandTokenOrThis t) 2162 "read without -r will mangle backslashes."
+  where
+    flags = getAllFlags t
+    has_t0 = fromMaybe False $ do
+        parsed <- getOpts flagsForRead flags
+        t <- getOpt "t" parsed
+        str <- getLiteralString t
+        return $ str == "0"
+
 checkReadWithoutR _ _ = return ()
 
 prop_checkUncheckedCd1 = verifyTree checkUncheckedCdPushdPopd "cd ~/src; rm -r foo"
@@ -3435,6 +3512,25 @@ checkDollarQuoteParen params t =
         _ -> return ()
   where
     fix id = fixWith [replaceStart id params 2 "\"$"]
+
+prop_checkTranslatedStringVariable1 = verify checkTranslatedStringVariable "foo_bar2=val; $\"foo_bar2\""
+prop_checkTranslatedStringVariable2 = verifyNot checkTranslatedStringVariable "$\"foo_bar2\""
+prop_checkTranslatedStringVariable3 = verifyNot checkTranslatedStringVariable "$\"..\""
+prop_checkTranslatedStringVariable4 = verifyNot checkTranslatedStringVariable "var=val; $\"$var\""
+prop_checkTranslatedStringVariable5 = verifyNot checkTranslatedStringVariable "foo=var; bar=val2; $\"foo bar\""
+checkTranslatedStringVariable params (T_DollarDoubleQuoted id [T_Literal _ s]) =
+  fromMaybe (return ()) $ do
+    guard $ all isVariableChar s
+    Map.lookup s assignments
+    return $
+        warnWithFix id 2256 "This translated string is the name of a variable. Flip leading $ and \" if this should be a quoted substitution." (fix id)
+  where
+    assignments = foldl (flip ($)) Map.empty (map insertAssignment $ variableFlow params)
+    insertAssignment (Assignment (_, token, name, _)) | isVariableName name =
+        Map.insert name token
+    insertAssignment _ = Prelude.id
+    fix id = fixWith [replaceStart id params 2 "\"$"]
+checkTranslatedStringVariable _ _ = return ()
 
 prop_checkDefaultCase1 = verify checkDefaultCase "case $1 in a) true ;; esac"
 prop_checkDefaultCase2 = verify checkDefaultCase "case $1 in ?*?) true ;; *? ) true ;; esac"

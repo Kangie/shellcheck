@@ -593,7 +593,7 @@ checkPrintfVar = CommandCheck (Exactly "printf") (f . arguments) where
 
         unless ('%' `elem` concat (oversimplify format) || isLiteral format) $
           info (getId format) 2059
-              "Don't use variables in the printf format string. Use printf \"..%s..\" \"$foo\"."
+              "Don't use variables in the printf format string. Use printf '..%s..' \"$foo\"."
       where
         onlyTrailingTs format argCount =
             all (== 'T') $ drop argCount format
@@ -696,7 +696,7 @@ prop_checkReadExpansions7 = verifyNot checkReadExpansions "read $1"
 prop_checkReadExpansions8 = verifyNot checkReadExpansions "read ${var?}"
 checkReadExpansions = CommandCheck (Exactly "read") check
   where
-    options = getGnuOpts "sreu:n:N:i:p:a:"
+    options = getGnuOpts flagsForRead
     getVars cmd = fromMaybe [] $ do
         opts <- options cmd
         return . map snd $ filter (\(x,_) -> x == "" || x == "a") opts
