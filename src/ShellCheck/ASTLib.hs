@@ -333,6 +333,10 @@ getCommandBasename = fmap basename . getCommandName
   where
     basename = reverse . takeWhile (/= '/') . reverse
 
+-- Get the arguments to a command
+arguments (T_SimpleCommand _ _ (cmd:args)) = args
+arguments t = maybe [] arguments (getCommand t)
+
 isAssignment t =
     case t of
         T_Redirecting _ _ w -> isAssignment w

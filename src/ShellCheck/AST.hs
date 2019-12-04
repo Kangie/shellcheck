@@ -394,4 +394,3 @@ doStackAnalysis :: Monad m => (Token -> m ()) -> (Token -> m ()) -> Token -> m T
 doStackAnalysis startToken endToken = analyze startToken endToken return
 doTransform :: (Token -> Token) -> Token -> Token
 doTransform i = runIdentity . analyze blank blank (return . i)
-arguments (T_SimpleCommand _ _ (cmd:args)) = args
