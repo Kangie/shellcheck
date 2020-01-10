@@ -171,6 +171,12 @@ portageInternalVariables = [
     -- confutils.eclass
     "EBUILD_SUPPORTS_SHAREDEXT",
 
+    -- coreboot-sdk.eclass
+    "COREBOOT_SDK_PREFIX", "COREBOOT_SDK_PREFIX_arm",
+    "COREBOOT_SDK_PREFIX_arm64", "COREBOOT_SDK_PREFIX_mips",
+    "COREBOOT_SDK_PREFIX_nds32", "COREBOOT_SDK_PREFIX_riscv",
+    "COREBOOT_SDK_PREFIX_x86_32", "COREBOOT_SDK_PREFIX_x86_64",
+
     -- cros-binary.eclass
     "CROS_BINARY_LOCAL_URI_BASE", "CROS_BINARY_URI",
 
