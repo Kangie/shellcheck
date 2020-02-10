@@ -2,11 +2,17 @@
 ### Fixed
 - `-f diff` no longer claims that it found more issues when it didn't
 - Known empty variables now correctly trigger SC2086
+- ShellCheck should now be compatible with Cabal 3
+- SC2154 and all command-specific checks now trigger for builtins
+  called with `builtin`
 
 ### Added
 - SC2254: Suggest quoting expansions in case statements
 - SC2255: Suggest using `$((..))` in `[ 2*3 -eq 6 ]`
 - SC2256: Warn about translated strings that are known variables
+
+### Changed
+- SC2230: This check is now off by default
 
 ## v0.7.0 - 2019-07-28
 ### Added

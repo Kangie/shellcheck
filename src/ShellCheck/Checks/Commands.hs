@@ -21,7 +21,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 
 -- This module contains checks that examine specific commands by name.
-module ShellCheck.Checks.Commands (checker , ShellCheck.Checks.Commands.runTests) where
+module ShellCheck.Checks.Commands (checker, optionalChecks, ShellCheck.Checks.Commands.runTests) where
 
 import ShellCheck.AST
 import ShellCheck.ASTLib
@@ -56,17 +56,19 @@ verifyDisabledCheckerInPortage = verifyDisabledCheckerInPortage2 $
                                    Ebuild { is9999Ebuild = True }
 
 verifyDisabledCheckerInPortage2 :: PortageFileType -> String -> Bool
-verifyDisabledCheckerInPortage2 portageFileType s =
-    case maybeParams of
-        Just params -> null $ runChecker params $ checker params
-        Nothing     -> False
+verifyDisabledCheckerInPortage2 portageFileType s = fromMaybe False $ do
+    params <- makeTestParams s portageTypeSpec
+    testSpec <- makeTestSpec
+    return $ null $ runChecker params (checker testSpec params)
     where
-      maybeParams = makeTestParams s $
-        \spec -> spec {
+      portageTypeSpec spec = spec {
            asPortageFileType = portageFileType
         }
+      makeTestSpec = do
+        let pr = pScript s
+        prRoot pr
+        return $ portageTypeSpec $ defaultSpec pr
 
-prop_commandChecksPortageWhich = verifyDisabledCheckerInPortage "which '.+'"
 
 commandCheckWhen :: Bool -> CommandCheck -> CommandCheck
 commandCheckWhen predicate commandCheck = if predicate
@@ -110,12 +112,29 @@ commandChecks params = [
     ,checkMvArguments, checkCpArguments, checkLnArguments
     ,checkFindRedirections
     ,checkReadExpansions
-    ,commandCheckWhen (not $ isPortageBuild params) checkWhich
     ,checkSudoRedirect
     ,checkSudoArgs
     ,checkSourceArgs
     ,checkChmodDashr
     ]
+
+optionalChecks = map fst optionalCommandChecks
+optionalCommandChecks :: [(CheckDescription, CommandCheck)]
+optionalCommandChecks = [
+    (newCheckDescription {
+        cdName = "deprecate-which",
+        cdDescription = "Suggest 'command -v' instead of 'which'",
+        cdPositive = "which javac",
+        cdNegative = "command -v javac"
+    }, checkWhich)
+    ]
+optionalCheckMap = Map.fromList $ map (\(desc, check) -> (cdName desc, check)) optionalCommandChecks
+
+prop_verifyOptionalExamples = all check optionalCommandChecks
+  where
+    check (desc, check) =
+      verify check (cdPositive desc)
+      && verifyNot check (cdNegative desc)
 
 buildCommandMap :: [CommandCheck] -> Map.Map CommandName (Token -> Analysis)
 buildCommandMap = foldl' addCheck Map.empty
@@ -125,12 +144,16 @@ buildCommandMap = foldl' addCheck Map.empty
 
 
 checkCommand :: Map.Map CommandName (Token -> Analysis) -> Token -> Analysis
-checkCommand map t@(T_SimpleCommand id _ (cmd:rest)) = fromMaybe (return ()) $ do
+checkCommand map t@(T_SimpleCommand id cmdPrefix (cmd:rest)) = fromMaybe (return ()) $ do
     name <- getLiteralString cmd
     return $
         if '/' `elem` name
         then
             Map.findWithDefault nullCheck (Basename $ basename name) map t
+        else if name == "builtin" && not (null rest) then
+            let t' = T_SimpleCommand id cmdPrefix rest
+                selectedBuiltin = fromMaybe "" $ getLiteralString . head $ rest
+            in Map.findWithDefault nullCheck (Exactly selectedBuiltin) map t'
         else do
             Map.findWithDefault nullCheck (Exactly name) map t
             Map.findWithDefault nullCheck (Basename name) map t
@@ -148,8 +171,14 @@ getChecker list = Checker {
     map = buildCommandMap list
 
 
-checker :: Parameters -> Checker
-checker = getChecker . commandChecks
+checker :: AnalysisSpec -> Parameters -> Checker
+checker spec params = getChecker $ (commandChecks params) ++ optionals
+  where
+    keys = asOptionalChecks spec
+    optionals =
+        if "all" `elem` keys
+        then map snd optionalCommandChecks
+        else mapMaybe (\x -> Map.lookup x optionalCheckMap) keys
 
 prop_checkTr1 = verify checkTr "tr [a-f] [A-F]"
 prop_checkTr2 = verify checkTr "tr 'a-z' 'A-Z'"
@@ -338,7 +367,7 @@ returnOrExit multi invalid = (f . arguments)
             invalid (getId value)
     f _ = return ()
 
-    isInvalid s = s == "" || any (not . isDigit) s || length s > 5
+    isInvalid s = null s || any (not . isDigit) s || length s > 5
         || let value = (read s :: Integer) in value > 255
 
     literal token = fromJust $ getLiteralStringExt lit token
@@ -699,7 +728,7 @@ checkReadExpansions = CommandCheck (Exactly "read") check
     options = getGnuOpts flagsForRead
     getVars cmd = fromMaybe [] $ do
         opts <- options cmd
-        return . map snd $ filter (\(x,_) -> x == "" || x == "a") opts
+        return [y | (x,y) <- opts, null x || x == "a"]
 
     check cmd = mapM_ warning $ getVars cmd
     warning t = potentially $ do
@@ -989,10 +1018,9 @@ missingDestination handler token = do
         _ -> return ()
   where
     args = getAllFlags token
-    params = map fst $ filter (\(_,x) -> x == "") args
+    params = [x | (x,"") <- args]
     hasTarget =
-        any (\x -> x /= "" && x `isPrefixOf` "target-directory") $
-            map snd args
+        any (\(_,x) -> x /= "" && x `isPrefixOf` "target-directory") args
 
 prop_checkMvArguments1 = verify    checkMvArguments "mv 'foo bar'"
 prop_checkMvArguments2 = verifyNot checkMvArguments "mv foo bar"
@@ -1052,7 +1080,7 @@ checkSudoRedirect = CommandCheck (Basename "sudo") f
             Just (T_Redirecting _ redirs _) ->
                 mapM_ warnAbout redirs
     warnAbout (T_FdRedirect _ s (T_IoFile id op file))
-        | (s == "" || s == "&") && not (special file) =
+        | (null s || s == "&") && not (special file) =
         case op of
             T_Less _ ->
               info (getId op) 2024
@@ -1078,7 +1106,7 @@ checkSudoArgs = CommandCheck (Basename "sudo") f
   where
     f t = potentially $ do
         opts <- parseOpts t
-        let nonFlags = map snd $ filter (\(flag, _) -> flag == "") opts
+        let nonFlags = [x | ("",x) <- opts]
         commandArg <- nonFlags !!! 0
         command <- getLiteralString commandArg
         guard $ command `elem` builtins

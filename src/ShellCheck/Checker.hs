@@ -91,9 +91,9 @@ checkScript sys spec = do
                     asPortageFileType = getPortageFileType $ csFilename spec
                 } where as = newAnalysisSpec root
         let analysisMessages =
-                fromMaybe [] $
+                maybe []
                     (arComments . analyzeScript . analysisSpec)
-                        <$> prRoot result
+                        $ prRoot result
         let translator = tokenToPosition tokenPositions
         return . nub . sortMessages . filter shouldInclude $
             (parseMessages ++ map translator analysisMessages)
@@ -107,7 +107,7 @@ checkScript sys spec = do
             code     = cCode (pcComment pc)
             severity = cSeverity (pcComment pc)
 
-    sortMessages = sortBy (comparing order)
+    sortMessages = sortOn order
     order pc =
         let pos = pcStartPos pc
             comment = pcComment pc in
@@ -201,11 +201,11 @@ prop_optionDisablesBadShebang =
                 }
 
 prop_annotationDisablesBadShebang =
-    [] == check "#!/usr/bin/python\n# shellcheck shell=sh\ntrue\n"
+    null $ check "#!/usr/bin/python\n# shellcheck shell=sh\ntrue\n"
 
 
 prop_canParseDevNull =
-    [] == check "source /dev/null"
+    null $ check "source /dev/null"
 
 prop_failsWhenNotSourcing =
     [1091, 2154] == check "source lol; echo \"$bar\""
@@ -221,7 +221,7 @@ prop_worksWhenDotting =
 
 -- FIXME: This should really be giving [1093], "recursively sourced"
 prop_noInfiniteSourcing =
-    [] == checkWithIncludes  [("lib", "source lib")] "source lib"
+    null $ checkWithIncludes  [("lib", "source lib")] "source lib"
 
 prop_canSourceBadSyntax =
     [1094, 2086] == checkWithIncludes [("lib", "for f; do")] "source lib; echo $1"
@@ -242,10 +242,10 @@ prop_recursiveParsing =
     [1037] == checkRecursive [("lib", "echo \"$10\"")] "source lib"
 
 prop_nonRecursiveAnalysis =
-    [] == checkWithIncludes [("lib", "echo $1")] "source lib"
+    null $ checkWithIncludes [("lib", "echo $1")] "source lib"
 
 prop_nonRecursiveParsing =
-    [] == checkWithIncludes [("lib", "echo \"$10\"")] "source lib"
+    null $ checkWithIncludes [("lib", "echo \"$10\"")] "source lib"
 
 prop_sourceDirectiveDoesntFollowFile =
     null $ checkWithIncludes
@@ -331,7 +331,7 @@ prop_optionIncludes4 =
     [2154] == checkOptionIncludes (Just [2154]) "#!/bin/sh\n var='a b'\n echo $var\n echo $bar"
 
 
-prop_readsRcFile = result == []
+prop_readsRcFile = null result
   where
     result = checkWithRc "disable=2086" emptyCheckSpec {
         csScript = "#!/bin/sh\necho $1",

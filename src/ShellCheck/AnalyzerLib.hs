@@ -582,9 +582,11 @@ getReferencedVariableCommand _ = []
 --   VariableName :: String,   -- The variable name, i.e. foo
 --   VariableValue :: DataType -- A description of the value being assigned, i.e. "Literal string with value foo"
 -- )
-getModifiedVariableCommand base@(T_SimpleCommand _ _ (T_NormalWord _ (T_Literal _ x:_):rest)) =
+getModifiedVariableCommand base@(T_SimpleCommand id cmdPrefix (T_NormalWord _ (T_Literal _ x:_):rest)) =
    filter (\(_,_,s,_) -> not ("-" `isPrefixOf` s)) $
     case x of
+        "builtin" ->
+            getModifiedVariableCommand $ T_SimpleCommand id cmdPrefix rest
         "read" ->
             let params = map getLiteral rest
                 readArrayVars = getReadArrayVariables rest
@@ -625,8 +627,7 @@ getModifiedVariableCommand base@(T_SimpleCommand _ _ (T_NormalWord _ (T_Literal 
         _ -> []
   where
     flags = map snd $ getAllFlags base
-    stripEquals s = let rest = dropWhile (/= '=') s in
-        if rest == "" then "" else tail rest
+    stripEquals s = drop 1 $ dropWhile (/= '=') s
     stripEqualsFrom (T_NormalWord id1 (T_Literal id2 s:rs)) =
         T_NormalWord id1 (T_Literal id2 (stripEquals s):rs)
     stripEqualsFrom (T_NormalWord id1 [T_DoubleQuoted id2 [T_Literal id3 s]]) =
@@ -657,7 +658,7 @@ getModifiedVariableCommand base@(T_SimpleCommand _ _ (T_NormalWord _ (T_Literal 
     getModifierParam _ _ = []
 
     letParamToLiteral token =
-          if var == ""
+          if null var
             then []
             else [(base, token, var, DataString $ SourceFrom [stripEqualsFrom token])]
         where var = takeWhile isVariableChar $ dropWhile (`elem` "+-") $ concat $ oversimplify token
@@ -798,8 +799,8 @@ isCommand token str = isCommandMatch token (\cmd -> cmd  == str || ('/' : str) `
 -- Compare a command to a literal. Like above, but checks full path.
 isUnqualifiedCommand token str = isCommandMatch token (== str)
 
-isCommandMatch token matcher = fromMaybe False $
-    fmap matcher (getCommandName token)
+isCommandMatch token matcher = maybe False
+    matcher (getCommandName token)
 
 -- Does this regex look like it was intended as a glob?
 -- True:  *foo*
@@ -966,14 +967,12 @@ getOpts string flags = process flags
         takesArg <- Map.lookup flag1 flagMap
         if takesArg
             then do
-                guard $ flag2 == ""
+                guard $ null flag2
                 more <- process rest
                 return $ (flag1, token2) : more
             else do
                 more <- process rest2
                 return $ (flag1, token1) : more
-
-getOpt str flags = snd <$> (listToMaybe $ filter (\(f, _) -> f == str) $ flags)
 
 supportsArrays shell = shell == Bash || shell == Ksh
 

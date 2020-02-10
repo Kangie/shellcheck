@@ -410,7 +410,7 @@ prop_checkArithmeticOpCommand1 = verify checkArithmeticOpCommand "i=i + 1"
 prop_checkArithmeticOpCommand2 = verify checkArithmeticOpCommand "foo=bar * 2"
 prop_checkArithmeticOpCommand3 = verifyNot checkArithmeticOpCommand "foo + opts"
 checkArithmeticOpCommand _ (T_SimpleCommand id [T_Assignment {}] (firstWord:_)) =
-    fromMaybe (return ()) $ check <$> getGlobOrLiteralString firstWord
+    maybe (return ()) check $ getGlobOrLiteralString firstWord
   where
     check op =
         when (op `elem` ["+", "-", "*", "/"]) $
@@ -494,8 +494,8 @@ checkPipePitfalls _ (T_Pipeline id _ commands) = do
 
     for ["grep", "wc"] $
         \(grep:wc:_) ->
-            let flagsGrep = fromMaybe [] $ map snd . getAllFlags <$> getCommand grep
-                flagsWc = fromMaybe [] $ map snd . getAllFlags <$> getCommand wc
+            let flagsGrep = maybe [] (map snd . getAllFlags) $ getCommand grep
+                flagsWc = maybe [] (map snd . getAllFlags) $ getCommand wc
             in
                 unless (any (`elem` ["o", "only-matching", "r", "R", "recursive"]) flagsGrep || any (`elem` ["m", "chars", "w", "words", "c", "bytes", "L", "max-line-length"]) flagsWc || null flagsWc) $
                     style (getId grep) 2126 "Consider using grep -c instead of grep|wc -l."
@@ -564,7 +564,7 @@ checkShebang params (T_Annotation _ list t) =
     isOverride _ = False
 checkShebang params (T_Script _ (T_Literal id sb) _) = execWriter $ do
     unless (shellTypeSpecified params) $ do
-        when (sb == "") $
+        when (null sb) $
             err id 2148 "Tips depend on target shell and yours is unknown. Add a shebang."
         when (executableFromShebang sb == "ash") $
             warn id 2187 "Ash scripts will be checked as Dash. Add '# shellcheck shell=dash' to silence."
@@ -1245,10 +1245,10 @@ checkLiteralBreakingTest _ t = potentially $
         return ()
 
     comparisonWarning list = do
-        token <- listToMaybe $ filter hasEquals list
+        token <- find hasEquals list
         return $ err (getId token) 2077 "You need spaces around the comparison operator."
     tautologyWarning t s = do
-        token <- listToMaybe $ filter isNonEmpty $ getWordParts t
+        token <- find isNonEmpty $ getWordParts t
         return $ err (getId token) 2157 s
 
 prop_checkConstantNullary = verify checkConstantNullary "[[ '$(foo)' ]]"
@@ -1309,7 +1309,7 @@ checkArithmeticDeref params t@(TA_Expansion _ [b@(T_DollarBraced id _ _)]) =
     unless (isException $ bracedString b) getWarning
   where
     isException [] = True
-    isException s = any (`elem` "/.:#%?*@$-!+=^,") s || isDigit (head s)
+    isException s@(h:_) = any (`elem` "/.:#%?*@$-!+=^,") s || isDigit h
     getWarning = fromMaybe noWarning . msum . map warningFor $ parents params t
     warningFor t =
         case t of
@@ -1655,9 +1655,9 @@ checkSpuriousExec _ = doLists
     doList = doList' . stripCleanup
     -- The second parameter is True if we are in a loop
     -- In that case we should emit the warning also if `exec' is the last statement
-    doList' t@(current:following:_) False = do
+    doList' (current:t@(following:_)) False = do
         commentIfExec current
-        doList (tail t) False
+        doList t False
     doList' (current:tail) True = do
         commentIfExec current
         doList tail True
@@ -2013,7 +2013,7 @@ prop_checkQuotesInLiterals9 = verifyNotTree checkQuotesInLiterals "param=\"/foo/
 checkQuotesInLiterals params t =
     doVariableFlowAnalysis readF writeF Map.empty (variableFlow params)
   where
-    getQuotes name = fmap (Map.lookup name) get
+    getQuotes name = gets (Map.lookup name)
     setQuotes name ref = modify $ Map.insert name ref
     deleteQuotes = modify . Map.delete
     parents = parentMap params
@@ -2246,6 +2246,7 @@ prop_checkUnassignedReferences35= verifyNotTree checkUnassignedReferences "echo 
 prop_checkUnassignedReferences36= verifyNotTree checkUnassignedReferences "read -a foo -r <<<\"foo bar\"; echo \"$foo\""
 prop_checkUnassignedReferences37= verifyNotTree checkUnassignedReferences "var=howdy; printf -v 'array[0]' %s \"$var\"; printf %s \"${array[0]}\";"
 prop_checkUnassignedReferences38= verifyTree (checkUnassignedReferences' True) "echo $VAR"
+prop_checkUnassignedReferences39= verifyNotTree checkUnassignedReferences "builtin export var=4; echo $var"
 
 checkUnassignedReferences = checkUnassignedReferences' False
 checkUnassignedReferences' includeGlobals params t = warnings
@@ -2388,7 +2389,7 @@ checkWhileReadPitfalls _ (T_WhileExpression id [command] contents)
     checkMuncher _ = return ()
 
     stdinRedirect (T_FdRedirect _ fd _)
-        | fd == "" || fd == "0" = True
+        | null fd || fd == "0" = True
     stdinRedirect _ = False
 checkWhileReadPitfalls _ _ = return ()
 
@@ -2691,8 +2692,8 @@ checkMultipleAppends params t =
   where
     checkList list =
         mapM_ checkGroup (groupWith (fmap fst) $ map getTarget list)
-    checkGroup (f:_:_:_) | isJust f =
-        style (snd $ fromJust f) 2129
+    checkGroup (Just (_,id):_:_:_) =
+        style id 2129
             "Consider using { cmd1; cmd2; } >> file instead of individual redirects."
     checkGroup _ = return ()
     getTarget (T_Annotation _ _ t) = getTarget t
@@ -2707,21 +2708,25 @@ checkMultipleAppends params t =
 
 prop_checkSuspiciousIFS1 = verify checkSuspiciousIFS "IFS=\"\\n\""
 prop_checkSuspiciousIFS2 = verifyNot checkSuspiciousIFS "IFS=$'\\t'"
-checkSuspiciousIFS params (T_Assignment id Assign "IFS" [] value) =
+prop_checkSuspiciousIFS3 = verify checkSuspiciousIFS "IFS=' \\t\\n'"
+checkSuspiciousIFS params (T_Assignment _ _ "IFS" [] value) =
     potentially $ do
         str <- getLiteralString value
         return $ check str
   where
-    n = if shellType params == Sh then "'<literal linefeed here>'" else "$'\\n'"
-    t = if shellType params == Sh then "\"$(printf '\\t')\"" else "$'\\t'"
+    hasDollarSingle = shellType params == Bash || shellType params == Ksh
+    n = if hasDollarSingle then  "$'\\n'" else "'<literal linefeed here>'"
+    t = if hasDollarSingle then  "$'\\t'" else "\"$(printf '\\t')\""
     check value =
         case value of
             "\\n" -> suggest n
-            "/n" -> suggest n
             "\\t" -> suggest t
-            "/t" -> suggest t
+            x | '\\' `elem` x -> suggest2 "a literal backslash"
+            x | 'n' `elem` x -> suggest2 "the literal letter 'n'"
+            x | 't' `elem` x -> suggest2 "the literal letter 't'"
             _ -> return ()
-    suggest r = warn id 2141 $ "Did you mean IFS=" ++ r ++ " ?"
+    suggest r = warn (getId value) 2141 $ "This backslash is literal. Did you mean IFS=" ++ r ++ " ?"
+    suggest2 desc = warn (getId value) 2141 $ "This IFS value contains " ++ desc ++ ". For tabs/linefeeds/escapes, use $'..', literal, or printf."
 checkSuspiciousIFS _ _ = return ()
 
 
@@ -2897,7 +2902,7 @@ checkReadWithoutR _ t@T_SimpleCommand {} | t `isUnqualifiedCommand` "read" =
     flags = getAllFlags t
     has_t0 = fromMaybe False $ do
         parsed <- getOpts flagsForRead flags
-        t <- getOpt "t" parsed
+        t <- lookup "t" parsed
         str <- getLiteralString t
         return $ str == "0"
 
@@ -2968,7 +2973,7 @@ checkLoopVariableReassignment params token =
   where
     check = do
         str <- loopVariable token
-        next <- listToMaybe $ filter (\x -> loopVariable x == Just str) path
+        next <- find (\x -> loopVariable x == Just str) path
         return $ do
             warn (getId token) 2165 "This nested loop overrides the index variable of its parent."
             warn (getId next)  2167 "This parent loop has its index variable overridden."
@@ -3079,9 +3084,13 @@ prop_checkArrayAssignmentIndices3 = verifyNotTree checkArrayAssignmentIndices "d
 prop_checkArrayAssignmentIndices4 = verifyTree checkArrayAssignmentIndices "typeset -A foo; foo+=(bar)"
 prop_checkArrayAssignmentIndices5 = verifyTree checkArrayAssignmentIndices "arr=( [foo]= bar )"
 prop_checkArrayAssignmentIndices6 = verifyTree checkArrayAssignmentIndices "arr=( [foo] = bar )"
-prop_checkArrayAssignmentIndices7 = verifyTree checkArrayAssignmentIndices "arr=( var=value )"
+prop_checkArrayAssignmentIndices7 = verifyNotTree checkArrayAssignmentIndices "arr=( var=value )"
 prop_checkArrayAssignmentIndices8 = verifyNotTree checkArrayAssignmentIndices "arr=( [foo]=bar )"
 prop_checkArrayAssignmentIndices9 = verifyNotTree checkArrayAssignmentIndices "arr=( [foo]=\"\" )"
+prop_checkArrayAssignmentIndices10 = verifyTree checkArrayAssignmentIndices "declare -A arr; arr=( var=value )"
+prop_checkArrayAssignmentIndices11 = verifyTree checkArrayAssignmentIndices "arr=( 1=value )"
+prop_checkArrayAssignmentIndices12 = verifyTree checkArrayAssignmentIndices "arr=( $a=value )"
+prop_checkArrayAssignmentIndices13 = verifyTree checkArrayAssignmentIndices "arr=( $((1+1))=value )"
 checkArrayAssignmentIndices params root =
     runNodeAnalysis check params root
   where
@@ -3106,7 +3115,7 @@ checkArrayAssignmentIndices params root =
                     (id, str) <- case part of
                         T_Literal id str -> [(id,str)]
                         _ -> []
-                    guard $ '=' `elem` str
+                    guard $ '=' `elem` str && hasNumericIndex str
                     return $ warnWithFix id 2191 "The = here is literal. To assign by index, use ( [index]=value ) with no spaces. To keep as literal, quote it." (surroundWidth id params "\"")
                 in
                     if null literalEquals && isAssociative
@@ -3114,6 +3123,9 @@ checkArrayAssignmentIndices params root =
                     else sequence_ literalEquals
 
             _ -> return ()
+      where
+        hasNumericIndex str = all isDigit $ takeWhile (/= '=') str
+
 
 prop_checkUnmatchableCases1 = verify checkUnmatchableCases "case foo in bar) true; esac"
 prop_checkUnmatchableCases2 = verify checkUnmatchableCases "case foo-$bar in ??|*) true; esac"
@@ -3198,9 +3210,9 @@ checkSubshellAsTest _ t =
 
 
     checkParams id first second = do
-        when (fromMaybe False $ (`elem` unaryTestOps) <$> getLiteralString first) $
+        when (maybe False (`elem` unaryTestOps) $ getLiteralString first) $
             err id 2204 "(..) is a subshell. Did you mean [ .. ], a test expression?"
-        when (fromMaybe False $ (`elem` binaryTestOps) <$> getLiteralString second) $
+        when (maybe False (`elem` binaryTestOps) $ getLiteralString second) $
             warn id 2205 "(..) is a subshell. Did you mean [ .. ], a test expression?"
 
 
@@ -3227,7 +3239,7 @@ checkSplittingInArrays params t =
         T_DollarBraced id _ str |
             not (isCountingReference part)
             && not (isQuotedAlternativeReference part)
-            && not (getBracedReference (bracedString part) `elem` (variablesWithoutSpaces params))
+            && getBracedReference (bracedString part) `notElem` (variablesWithoutSpaces params)
             -> warn id 2206 $
                 if shellType params == Ksh
                 then "Quote to prevent word splitting/globbing, or split robustly with read -A or while read."

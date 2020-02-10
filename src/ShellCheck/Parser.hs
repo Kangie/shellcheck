@@ -34,7 +34,7 @@ import Control.Monad.Identity
 import Control.Monad.Trans
 import Data.Char
 import Data.Functor
-import Data.List (isPrefixOf, isInfixOf, isSuffixOf, partition, sortBy, intercalate, nub)
+import Data.List (isPrefixOf, isInfixOf, isSuffixOf, partition, sortBy, intercalate, nub, find)
 import Data.Maybe
 import Data.Monoid
 import Debug.Trace
@@ -246,6 +246,10 @@ addParseNote n = do
             parseNotes = n : parseNotes state
         }
 
+ignoreProblemsOf p = do
+    systemState <- lift . lift $ Ms.get
+    p <* (lift . lift . Ms.put $ systemState)
+
 shouldIgnoreCode code = do
     context <- getCurrentContexts
     checkSourced <- Mr.asks checkSourced
@@ -321,16 +325,15 @@ parseProblem level code msg = do
     parseProblemAt pos level code msg
 
 setCurrentContexts c = Ms.modify (\state -> state { contextStack = c })
-getCurrentContexts = contextStack <$> Ms.get
+getCurrentContexts = Ms.gets contextStack
 
 popContext = do
     v <- getCurrentContexts
-    if not $ null v
-        then do
-            let (a:r) = v
+    case v of
+        (a:r) -> do
             setCurrentContexts r
             return $ Just a
-        else
+        [] ->
             return Nothing
 
 pushContext c = do
@@ -585,7 +588,7 @@ readConditionContents single =
 
     checkTrailingOp x = fromMaybe (return ()) $ do
         (T_Literal id str) <- getTrailingUnquotedLiteral x
-        trailingOp <- listToMaybe (filter (`isSuffixOf` str) binaryTestOps)
+        trailingOp <- find (`isSuffixOf` str) binaryTestOps
         return $ parseProblemAtId id ErrorC 1108 $
             "You need a space before and after the " ++ trailingOp ++ " ."
 
@@ -1040,14 +1043,16 @@ prop_readNormalWord9 = isOk readSubshell "(foo\\ ;\nbar)"
 prop_readNormalWord10 = isWarning readNormalWord "\x201Chello\x201D"
 prop_readNormalWord11 = isWarning readNormalWord "\x2018hello\x2019"
 prop_readNormalWord12 = isWarning readNormalWord "hello\x2018"
-readNormalWord = readNormalishWord ""
+readNormalWord = readNormalishWord "" ["do", "done", "then", "fi", "esac"]
 
-readNormalishWord end = do
+readPatternWord = readNormalishWord "" ["esac"]
+
+readNormalishWord end terms = do
     start <- startSpan
     pos <- getPosition
     x <- many1 (readNormalWordPart end)
     id <- endSpan start
-    checkPossibleTermination pos x
+    checkPossibleTermination pos x terms
     return $ T_NormalWord id x
 
 readIndexSpan = do
@@ -1067,10 +1072,10 @@ readIndexSpan = do
         id <- endSpan start
         return $ T_Literal id str
 
-checkPossibleTermination pos [T_Literal _ x] =
-    when (x `elem` ["do", "done", "then", "fi", "esac"]) $
+checkPossibleTermination pos [T_Literal _ x] terminators =
+    when (x `elem` terminators) $
         parseProblemAt pos WarningC 1010 $ "Use semicolon or linefeed before '" ++ x ++ "' (or quote to make it literal)."
-checkPossibleTermination _ _ = return ()
+checkPossibleTermination _ _ _ = return ()
 
 readNormalWordPart end = do
     notFollowedBy2 $ oneOf end
@@ -2047,7 +2052,11 @@ readSimpleCommand = called "simple command" $ do
 
       Just cmd -> do
             validateCommand cmd
-            suffix <- option [] $ getParser readCmdSuffix cmd [
+            -- We have to ignore possible parsing problems from the lookAhead parser
+            firstArgument <- ignoreProblemsOf . optionMaybe . try . lookAhead $ readCmdWord
+            suffix <- option [] $ getParser readCmdSuffix
+                    -- If `export` or other modifier commands are called with `builtin` we have to look at the first argument
+                    (if isCommand ["builtin"] cmd && isJust firstArgument then fromJust firstArgument else cmd) [
                         (["declare", "export", "local", "readonly", "typeset"], readModifierSuffix),
                         (["time"], readTimeSuffix),
                         (["let"], readLetSuffix),
@@ -2532,6 +2541,7 @@ prop_readCaseClause2 = isOk readCaseClause "case foo\n in * ) echo bar;; esac"
 prop_readCaseClause3 = isOk readCaseClause "case foo\n in * ) echo bar & ;; esac"
 prop_readCaseClause4 = isOk readCaseClause "case foo\n in *) echo bar ;& bar) foo; esac"
 prop_readCaseClause5 = isOk readCaseClause "case foo\n in *) echo bar;;& foo) baz;; esac"
+prop_readCaseClause6 = isOk readCaseClause "case foo\n in if) :;; done) :;; esac"
 readCaseClause = called "case expression" $ do
     start <- startSpan
     g_Case
@@ -2655,7 +2665,7 @@ readCoProc = called "coproc" $ do
         return $ T_CoProcBody id body
 
 
-readPattern = (readNormalWord `thenSkip` spacing) `sepBy1` (char '|' `thenSkip` spacing)
+readPattern = (readPatternWord `thenSkip` spacing) `sepBy1` (char '|' `thenSkip` spacing)
 
 prop_readCompoundCommand = isOk readCompoundCommand "{ echo foo; }>/dev/null"
 readCompoundCommand = do
@@ -3158,7 +3168,7 @@ readScriptFile sourced = do
             Nothing -> parseProblemAt pos ErrorC 1008 "This shebang was unrecognized. ShellCheck only supports sh/bash/dash/ksh. Add a 'shell' directive to specify."
 
     isValidShell s =
-        let good = s == "" || any (`isPrefixOf` s) goodShells
+        let good = null s || any (`isPrefixOf` s) goodShells
             bad = any (`isPrefixOf` s) badShells
         in
             if good
