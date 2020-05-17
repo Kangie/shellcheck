@@ -56,6 +56,12 @@ portageInternalVariables = [
     "S", "SLOT", "SRC_TEST", "SRC_URI", "STRIP_MASK", "SUBSLOT", "SYSROOT", "T",
     "WORKDIR"
 
+    -- toolchain settings
+    , "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "FFLAGS", "FCFLAGS",
+    "CBUILD", "CHOST"
+    -- TODO: Delete these if we can handle `tc-export CC` implicit export.
+    , "CC", "CPP", "CXX"
+
     -- portage internals
     , "EBUILD_PHASE", "EBUILD_SH_ARGS", "EMERGE_FROM", "FILESDIR",
     "MERGE_TYPE", "PM_EBUILD_HOOK_DIR", "PORTAGE_ACTUAL_DISTDIR",
