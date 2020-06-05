@@ -192,7 +192,7 @@ makeCommentWithFix severity id code str fix =
         withFix = comment {
             tcFix = Just fix
         }
-    in withFix `deepseq` withFix
+    in force withFix
 
 makeParameters spec =
     let params = Parameters {
@@ -254,19 +254,14 @@ prop_determineShell8 = determineShellTest' (Just Ksh) "#!/bin/sh" == Sh
 
 determineShellTest = determineShellTest' Nothing
 determineShellTest' fallbackShell = determineShell fallbackShell . fromJust . prRoot . pScript
-determineShell fallbackShell t = fromMaybe Bash $ do
-    shellString <- foldl mplus Nothing $ getCandidates t
+determineShell fallbackShell t = fromMaybe Bash $
     shellForExecutable shellString `mplus` fallbackShell
   where
-    forAnnotation t =
-        case t of
-            (ShellOverride s) -> return s
-            _                 -> fail ""
-    getCandidates :: Token -> [Maybe String]
-    getCandidates t@T_Script {} = [Just $ fromShebang t]
-    getCandidates (T_Annotation _ annotations s) =
-        map forAnnotation annotations ++
-           [Just $ fromShebang s]
+    shellString = getCandidate t
+    getCandidate :: Token -> String
+    getCandidate t@T_Script {} = fromShebang t
+    getCandidate (T_Annotation _ annotations s) =
+        headOrDefault (fromShebang s) [s | ShellOverride s <- annotations]
     fromShebang (T_Script _ (T_Literal _ s) _) = executableFromShebang s
 
 -- Given a string like "/bin/bash" or "/usr/bin/env dash",
@@ -274,7 +269,7 @@ determineShell fallbackShell t = fromMaybe Bash $ do
 executableFromShebang :: String -> String
 executableFromShebang = shellFor
   where
-    shellFor s | "/env " `isInfixOf` s = head (drop 1 (words s)++[""])
+    shellFor s | "/env " `isInfixOf` s = headOrDefault "" (drop 1 $ words s)
     shellFor s | ' ' `elem` s = shellFor $ takeWhile (/= ' ') s
     shellFor s = reverse . takeWhile (/= '/') . reverse $ s
 
@@ -313,15 +308,15 @@ isQuoteFree = isQuoteFreeNode False
 
 
 isQuoteFreeNode strict tree t =
-    (isQuoteFreeElement t == Just True) ||
-        head (mapMaybe isQuoteFreeContext (drop 1 $ getPath tree t) ++ [False])
+    isQuoteFreeElement t ||
+        headOrDefault False (mapMaybe isQuoteFreeContext (drop 1 $ getPath tree t))
   where
     -- Is this node self-quoting in itself?
     isQuoteFreeElement t =
         case t of
-            T_Assignment {} -> return True
-            T_FdRedirect {} -> return True
-            _               -> Nothing
+            T_Assignment {} -> True
+            T_FdRedirect {} -> True
+            _               -> False
 
     -- Are any subnodes inherently self-quoting?
     isQuoteFreeContext t =
@@ -374,8 +369,8 @@ getClosestCommand tree t =
 
 -- Like above, if koala_man knew Haskell when starting this project.
 getClosestCommandM t = do
-    tree <- asks parentMap
-    return $ getClosestCommand tree t
+    params <- ask
+    return $ getClosestCommand (parentMap params) t
 
 -- Is the token used as a command name (the first word in a T_SimpleCommand)?
 usedAsCommandName tree token = go (getId token) (tail $ getPath tree token)
@@ -397,8 +392,8 @@ getPath tree t = t :
 -- Version of the above taking the map from the current context
 -- Todo: give this the name "getPath"
 getPathM t = do
-    map <- asks parentMap
-    return $ getPath map t
+    params <- ask
+    return $ getPath (parentMap params) t
 
 isParentOf tree parent child =
     elem (getId parent) . map getId $ getPath tree child
@@ -408,14 +403,13 @@ parents params = getPath (parentMap params)
 -- Find the first match in a list where the predicate is Just True.
 -- Stops if it's Just False and ignores Nothing.
 findFirst :: (a -> Maybe Bool) -> [a] -> Maybe a
-findFirst p l =
-    case l of
-        [] -> Nothing
-        (x:xs) ->
-            case p x of
-                Just True  -> return x
-                Just False -> Nothing
-                Nothing    -> findFirst p xs
+findFirst p = foldr go Nothing
+  where
+    go x acc =
+      case p x of
+        Just True  -> return x
+        Just False -> Nothing
+        Nothing    -> acc
 
 -- Check whether a word is entirely output from a single command
 tokenIsJustCommandOutput t = case t of
@@ -430,8 +424,7 @@ tokenIsJustCommandOutput t = case t of
 
 -- TODO: Replace this with a proper Control Flow Graph
 getVariableFlow params t =
-    let (_, stack) = runState (doStackAnalysis startScope endScope t) []
-    in reverse stack
+    reverse $ execState (doStackAnalysis startScope endScope t) []
   where
     startScope t =
         let scopeType = leadType params t
@@ -469,7 +462,7 @@ leadType params t =
         T_BatsTest {} -> SubshellScope "@bats test"
         T_CoProcBody _ _  -> SubshellScope "coproc"
         T_Redirecting {}  ->
-            if fromMaybe False causesSubshell
+            if causesSubshell == Just True
             then SubshellScope "pipeline"
             else NoneScope
         _ -> NoneScope
@@ -482,28 +475,22 @@ leadType params t =
 
     causesSubshell = do
         (T_Pipeline _ _ list) <- parentPipeline
-        if length list <= 1
-            then return False
-            else if not $ hasLastpipe params
-                then return True
-                else return . not $ (getId . head $ reverse list) == getId t
+        return $ case list of
+            _:_:_ -> not (hasLastpipe params) || getId (last list) /= getId t
+            _ -> False
 
 getModifiedVariables t =
     case t of
         T_SimpleCommand _ vars [] ->
-            concatMap (\x -> case x of
-                                T_Assignment id _ name _ w  ->
-                                    [(x, x, name, dataTypeFrom DataString w)]
-                                _ -> []
-                      ) vars
-        c@T_SimpleCommand {} ->
-            getModifiedVariableCommand c
+            [(x, x, name, dataTypeFrom DataString w) | x@(T_Assignment id _ name _ w) <- vars]
+        T_SimpleCommand {} ->
+            getModifiedVariableCommand t
 
         TA_Unary _ "++|" v@(TA_Variable _ name _)  ->
             [(t, v, name, DataString $ SourceFrom [v])]
         TA_Unary _ "|++" v@(TA_Variable _ name _)  ->
             [(t, v, name, DataString $ SourceFrom [v])]
-        TA_Assignment _ op (TA_Variable _ name _) rhs -> maybeToList $ do
+        TA_Assignment _ op (TA_Variable _ name _) rhs -> do
             guard $ op `elem` ["=", "*=", "/=", "%=", "+=", "-=", "<<=", ">>=", "&=", "^=", "|="]
             return (t, t, name, DataString $ SourceFrom [rhs])
 
@@ -515,26 +502,26 @@ getModifiedVariables t =
 
         -- Count [[ -v foo ]] as an "assignment".
         -- This is to prevent [ -v foo ] being unassigned or unused.
-        TC_Unary id _ "-v" token -> maybeToList $ do
+        TC_Unary id _ "-v" token -> do
             str <- fmap (takeWhile (/= '[')) $ -- Quoted index
                     flip getLiteralStringExt token $ \x ->
                 case x of
                     T_Glob _ s -> return s -- Unquoted index
-                    _          -> Nothing
+                    _          -> []
 
             guard . not . null $ str
             return (t, token, str, DataString SourceChecked)
 
-        T_DollarBraced _ _ l -> maybeToList $ do
-            let string = bracedString t
+        T_DollarBraced _ _ l -> do
+            let string = concat $ oversimplify l
             let modifier = getBracedModifier string
-            guard $ ":=" `isPrefixOf` modifier
+            guard $ any (`isPrefixOf` modifier) ["=", ":="]
             return (t, t, getBracedReference string, DataString $ SourceFrom [l])
 
-        t@(T_FdRedirect _ ('{':var) op) -> -- {foo}>&2 modifies foo
+        T_FdRedirect _ ('{':var) op -> -- {foo}>&2 modifies foo
             [(t, t, takeWhile (/= '}') var, DataString SourceInteger) | not $ isClosingFileOp op]
 
-        t@(T_CoProc _ name _) ->
+        T_CoProc _ name _ ->
             [(t, t, fromMaybe "COPROC" name, DataArray SourceInteger)]
 
         --Points to 'for' rather than variable
@@ -563,8 +550,9 @@ getReferencedVariableCommand base@(T_SimpleCommand _ _ (T_NormalWord _ (T_Litera
             else []
         "trap" ->
             case rest of
-                head:_ -> map (\x -> (head, head, x)) $ getVariablesFromLiteralToken head
+                head:_ -> map (\x -> (base, head, x)) $ getVariablesFromLiteralToken head
                 _ -> []
+        "alias" -> [(base, token, name) | token <- rest, name <- getVariablesFromLiteralToken token]
         _ -> []
   where
     getReference t@(T_Assignment _ _ name _ value) = [(t, t, name)]
@@ -591,7 +579,7 @@ getModifiedVariableCommand base@(T_SimpleCommand id cmdPrefix (T_NormalWord _ (T
             let params = map getLiteral rest
                 readArrayVars = getReadArrayVariables rest
             in
-                catMaybes . (++ readArrayVars) . takeWhile isJust . reverse $ params
+                catMaybes $ takeWhile isJust (reverse params) ++ readArrayVars
         "getopts" ->
             case rest of
                 opts:var:_ -> maybeToList $ getLiteral var
@@ -696,12 +684,10 @@ getModifiedVariableCommand base@(T_SimpleCommand id cmdPrefix (T_NormalWord _ (T
         map (getLiteralArray . snd)
             (filter (isArrayFlag . fst) (zip args (tail args)))
 
-    isArrayFlag x = fromMaybe False $ do
-        str <- getLiteralString x
-        return $ case str of
-                    '-':'-':_ -> False
-                    '-':str -> 'a' `elem` str
-                    _ -> False
+    isArrayFlag x = case getLiteralString x of
+                       Just ('-':'-':_) -> False
+                       Just ('-':str) -> 'a' `elem` str
+                       _ -> False
 
     -- get the FLAGS_ variable created by a shflags DEFINE_ call
     getFlagVariable (n:v:_) = do
@@ -732,7 +718,7 @@ getOffsetReferences mods = fromMaybe [] $ do
 
 getReferencedVariables parents t =
     case t of
-        T_DollarBraced id _ l -> let str = bracedString t in
+        T_DollarBraced id _ l -> let str = concat $ oversimplify l in
             (t, t, getBracedReference str) :
                 map (\x -> (l, l, x)) (
                     getIndexReferences str
@@ -757,7 +743,7 @@ getReferencedVariables parents t =
             (t, t, "output")
             ]
 
-        t@(T_FdRedirect _ ('{':var) op) -> -- {foo}>&- references and closes foo
+        T_FdRedirect _ ('{':var) op -> -- {foo}>&- references and closes foo
             [(t, t, takeWhile (/= '}') var) | isClosingFileOp op]
         x -> getReferencedVariableCommand x
   where
@@ -774,12 +760,11 @@ getReferencedVariables parents t =
 
     literalizer t = case t of
         T_Glob _ s -> return s    -- Also when parsed as globs
-        _          -> Nothing
+        _          -> []
 
-    getIfReference context token = maybeToList $ do
-            str <- getLiteralStringExt literalizer token
-            guard . not $ null str
-            when (isDigit $ head str) $ fail "is a number"
+    getIfReference context token = do
+            str@(h:_) <- getLiteralStringExt literalizer token
+            when (isDigit h) $ fail "is a number"
             return (context, token, getBracedReference str)
 
     isDereferencing = (`elem` ["-eq", "-ne", "-lt", "-le", "-gt", "-ge"])
@@ -821,14 +806,14 @@ isVariableName (x:r) = isVariableStartChar x && all isVariableChar r
 isVariableName _     = False
 
 getVariablesFromLiteralToken token =
-    getVariablesFromLiteral (fromJust $ getLiteralStringExt (const $ return " ") token)
+    getVariablesFromLiteral (getLiteralStringDef " " token)
 
 -- Try to get referenced variables from a literal string like "$foo"
 -- Ignores tons of cases like arithmetic evaluation and array indices.
 prop_getVariablesFromLiteral1 =
     getVariablesFromLiteral "$foo${bar//a/b}$BAZ" == ["foo", "bar", "BAZ"]
 getVariablesFromLiteral string =
-    map (!! 0) $ matchAllSubgroups variableRegex string
+    map head $ matchAllSubgroups variableRegex string
   where
     variableRegex = mkRegex "\\$\\{?([A-Za-z0-9_]+)"
 
@@ -850,20 +835,18 @@ getBracedReference s = fromMaybe s $
     nameExpansion s `mplus` takeName noPrefix `mplus` getSpecial noPrefix `mplus` getSpecial s
   where
     noPrefix = dropPrefix s
-    dropPrefix (c:rest) = if c `elem` "!#" then rest else c:rest
-    dropPrefix ""       = ""
+    dropPrefix (c:rest) | c `elem` "!#" = rest
+    dropPrefix cs = cs
     takeName s = do
         let name = takeWhile isVariableChar s
         guard . not $ null name
         return name
-    getSpecial (c:_) =
-        if c `elem` "*@#?-$!" then return [c] else fail "not special"
-    getSpecial _ = fail "empty"
+    getSpecial (c:_) | c `elem` "*@#?-$!" = return [c]
+    getSpecial _ = fail "empty or not special"
 
-    nameExpansion ('!':rest) = do -- e.g. ${!foo*bar*}
-        let suffix = dropWhile isVariableChar rest
-        guard $ suffix /= rest -- e.g. ${!@}
-        first <- suffix !!! 0
+    nameExpansion ('!':next:rest) = do -- e.g. ${!foo*bar*}
+        guard $ isVariableChar next -- e.g. ${!@}
+        first <- find (not . isVariableChar) rest
         guard $ first `elem` "*?"
         return ""
     nameExpansion _ = Nothing
@@ -871,7 +854,7 @@ getBracedReference s = fromMaybe s $
 prop_getBracedModifier1 = getBracedModifier "foo:bar:baz" == ":bar:baz"
 prop_getBracedModifier2 = getBracedModifier "!var:-foo" == ":-foo"
 prop_getBracedModifier3 = getBracedModifier "foo[bar]" == "[bar]"
-getBracedModifier s = fromMaybe "" . listToMaybe $ do
+getBracedModifier s = headOrDefault "" $ do
     let var = getBracedReference s
     a <- dropModifier s
     dropPrefix var a
@@ -885,15 +868,6 @@ getBracedModifier s = fromMaybe "" . listToMaybe $ do
 
 -- Useful generic functions.
 
--- Run an action in a Maybe (or do nothing).
--- Example:
--- potentially $ do
---   s <- getLiteralString cmd
---   guard $ s `elem` ["--recursive", "-r"]
---   return $ warn .. "Something something recursive"
-potentially :: Monad m => Maybe (m ()) -> m ()
-potentially = fromMaybe (return ())
-
 -- Get element 0 or a default. Like `head` but safe.
 headOrDefault _ (a:_) = a
 headOrDefault def _   = def
@@ -906,8 +880,8 @@ headOrDefault def _   = def
 
 -- Run a command if the shell is in the given list
 whenShell l c = do
-    shell <- asks shellType
-    when (shell `elem` l ) c
+    params <- ask
+    when (shellType params `elem` l ) c
 
 
 filterByAnnotation asSpec params =
@@ -936,8 +910,8 @@ isCountingReference _ = False
 -- FIXME: doesn't handle ${a:+$var} vs ${a:+"$var"}
 isQuotedAlternativeReference t =
     case t of
-        T_DollarBraced _ _ _ ->
-            getBracedModifier (bracedString t) `matches` re
+        T_DollarBraced _ _ l ->
+            getBracedModifier (concat $ oversimplify l) `matches` re
         _ -> False
   where
     re = mkRegex "(^|\\]):?\\+"
@@ -959,22 +933,19 @@ getOpts string flags = process flags
     flagMap = Map.fromList $ ("", False) : flagList string
 
     process [] = return []
-    process [(token, flag)] = do
+    process ((token1, flag):rest1) = do
         takesArg <- Map.lookup flag flagMap
-        guard $ not takesArg
-        return [(flag, token)]
-    process ((token1, flag1):rest2@((token2, flag2):rest)) = do
-        takesArg <- Map.lookup flag1 flagMap
-        if takesArg
-            then do
-                guard $ null flag2
-                more <- process rest
-                return $ (flag1, token2) : more
-            else do
-                more <- process rest2
-                return $ (flag1, token1) : more
+        (token, rest) <- if takesArg
+            then case rest1 of
+                (token2, ""):rest2 -> return (token2, rest2)
+                _ -> fail "takesArg without valid arg"
+            else return (token1, rest1)
+        more <- process rest
+        return $ (flag, token) : more
 
-supportsArrays shell = shell == Bash || shell == Ksh
+supportsArrays Bash = True
+supportsArrays Ksh = True
+supportsArrays _ = False
 
 -- Returns true if the shell is Bash or Ksh (sorry for the name, Ksh)
 isBashLike :: Parameters -> Bool

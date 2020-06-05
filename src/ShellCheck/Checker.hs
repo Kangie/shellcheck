@@ -48,7 +48,7 @@ tokenToPosition startMap t = fromMaybe fail $ do
   where
     fail = error "Internal shellcheck error: id doesn't exist. Please report!"
 
-shellFromFilename filename = foldl mplus Nothing candidates
+shellFromFilename filename = listToMaybe candidates
   where
     shellExtensions = [(".ksh", Ksh)
                       ,(".bash", Bash)
@@ -59,7 +59,7 @@ shellFromFilename filename = foldl mplus Nothing candidates
                       -- The `.sh` is too generic to determine the shell:
                       -- We fallback to Bash in this case and emit SC2148 if there is no shebang
     candidates =
-        map (\(ext,sh) -> if ext `isSuffixOf` filename then Just sh else Nothing) shellExtensions
+        [sh | (ext,sh) <- shellExtensions, ext `isSuffixOf` filename]
 
 checkScript :: Monad m => SystemInterface m -> CheckSpec -> m CheckResult
 checkScript sys spec = do
@@ -289,6 +289,20 @@ prop_deducesTypeFromExtension2 = result == [2079]
     result = checkWithSpec [] emptyCheckSpec {
         csFilename = "file.bash",
         csScript = "(( 3.14 ))"
+    }
+
+prop_canDisableShebangWarning = null $ result
+  where
+    result = checkWithSpec [] emptyCheckSpec {
+        csFilename = "file.sh",
+        csScript = "#shellcheck disable=SC2148\nfoo"
+    }
+
+prop_canDisableParseErrors = null $ result
+  where
+    result = checkWithSpec [] emptyCheckSpec {
+        csFilename = "file.sh",
+        csScript = "#shellcheck disable=SC1073,SC1072,SC2148\n()"
     }
 
 prop_shExtensionDoesntMatter = result == [2148]

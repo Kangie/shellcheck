@@ -274,9 +274,6 @@ data Replacement = Replacement {
 data InsertionPoint = InsertBefore | InsertAfter
     deriving (Show, Eq, Generic, NFData)
 
-instance Ord Replacement where
-    compare r1 r2 = (repStartPos r1) `compare` (repStartPos r2)
-
 newReplacement = Replacement {
     repStartPos = newPosition,
     repEndPos = newPosition,
@@ -334,10 +331,10 @@ mockedSystemInterface files = SystemInterface {
     siGetConfig = const $ return Nothing
 }
   where
-    rf file =
-        case filter ((== file) . fst) files of
-            [] -> return $ Left "File not included in mock."
-            [(_, contents)] -> return $ Right contents
+    rf file = return $
+        case find ((== file) . fst) files of
+            Nothing -> Left "File not included in mock."
+            Just (_, contents) -> Right contents
     fs _ _ file = return file
 
 mockRcFile rcfile mock = mock {

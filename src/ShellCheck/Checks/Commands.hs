@@ -19,6 +19,7 @@
 -}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE MultiWayIf #-}
 
 -- This module contains checks that examine specific commands by name.
 module ShellCheck.Checks.Commands (checker, optionalChecks, ShellCheck.Checks.Commands.runTests) where
@@ -34,6 +35,7 @@ import ShellCheck.Regex
 import Control.Monad
 import Control.Monad.RWS
 import Data.Char
+import Data.Functor.Identity
 import Data.List
 import Data.Maybe
 import qualified Data.Map.Strict as Map
@@ -144,7 +146,7 @@ buildCommandMap = foldl' addCheck Map.empty
 
 
 checkCommand :: Map.Map CommandName (Token -> Analysis) -> Token -> Analysis
-checkCommand map t@(T_SimpleCommand id cmdPrefix (cmd:rest)) = fromMaybe (return ()) $ do
+checkCommand map t@(T_SimpleCommand id cmdPrefix (cmd:rest)) = sequence_ $ do
     name <- getLiteralString cmd
     return $
         if '/' `elem` name
@@ -218,15 +220,13 @@ prop_checkFindNameGlob1 = verify checkFindNameGlob "find / -name *.php"
 prop_checkFindNameGlob2 = verify checkFindNameGlob "find / -type f -ipath *(foo)"
 prop_checkFindNameGlob3 = verifyNot checkFindNameGlob "find * -name '*.php'"
 checkFindNameGlob = CommandCheck (Basename "find") (f . arguments)  where
-    acceptsGlob (Just s) = s `elem` [ "-ilname", "-iname", "-ipath", "-iregex", "-iwholename", "-lname", "-name", "-path", "-regex", "-wholename" ]
-    acceptsGlob _ = False
+    acceptsGlob s = s `elem` [ "-ilname", "-iname", "-ipath", "-iregex", "-iwholename", "-lname", "-name", "-path", "-regex", "-wholename" ]
     f [] = return ()
-    f [x] = return ()
-    f (a:b:r) = do
-        when (acceptsGlob (getLiteralString a) && isGlob b) $ do
-            let (Just s) = getLiteralString a
+    f (x:xs) = foldr g (const $ return ()) xs x
+    g b acc a = do
+        forM_ (getLiteralString a) $ \s -> when (acceptsGlob s && isGlob b) $
             warn (getId b) 2061 $ "Quote the parameter to " ++ s ++ " so the shell won't interpret it."
-        f (b:r)
+        acc b
 
 
 prop_checkNeedlessExpr = verify checkNeedlessExpr "foo=$(expr 3 + 2)"
@@ -270,13 +270,12 @@ prop_checkGrepRe23= verifyNot checkGrepRe "grep '.*' file"
 checkGrepRe = CommandCheck (Basename "grep") check where
     check cmd = f cmd (arguments cmd)
     -- --regex=*(extglob) doesn't work. Fixme?
-    skippable (Just s) = not ("--regex=" `isPrefixOf` s) && "-" `isPrefixOf` s
-    skippable _ = False
+    skippable s = not ("--regex=" `isPrefixOf` s) && "-" `isPrefixOf` s
     f _ [] = return ()
     f cmd (x:r) =
-        let str = getLiteralStringExt (const $ return "_") x
+        let str = getLiteralStringDef "_" x
         in
-            if str `elem` [Just "--", Just "-e", Just "--regex"]
+            if str `elem` ["--", "-e", "--regex"]
             then checkRE cmd r -- Regex is *after* this
             else
                 if skippable str
@@ -292,7 +291,7 @@ checkGrepRe = CommandCheck (Basename "grep") check where
             let string = concat $ oversimplify re
             if isConfusedGlobRegex string then
                 warn (getId re) 2063 "Grep uses regex, but this looks like a glob."
-              else potentially $ do
+              else sequence_ $ do
                 char <- getSuspiciousRegexWildcard string
                 return $ info (getId re) 2022 $
                     "Note that unlike globs, " ++ [char] ++ "* here matches '" ++ [char, char, char] ++ "' but not '" ++ wordStartingWith char ++ "'."
@@ -301,22 +300,16 @@ checkGrepRe = CommandCheck (Basename "grep") check where
         grepGlobFlags = ["fixed-strings", "F", "include", "exclude", "exclude-dir", "o", "only-matching"]
 
     wordStartingWith c =
-        head . filter ([c] `isPrefixOf`) $ candidates
+        headOrDefault (c:"test") . filter ([c] `isPrefixOf`) $ candidates
       where
         candidates =
-            sampleWords ++ map (\(x:r) -> toUpper x : r) sampleWords ++ [c:"test"]
+            sampleWords ++ map (\(x:r) -> toUpper x : r) sampleWords
 
-    getSuspiciousRegexWildcard str =
-        if not $ str `matches` contra
-        then do
-            match <- matchRegex suspicious str
-            str <- match !!! 0
-            str !!! 0
-        else
-            fail "looks good"
-      where
-        suspicious = mkRegex "([A-Za-z1-9])\\*"
-        contra = mkRegex "[^a-zA-Z1-9]\\*|[][^$+\\\\]"
+    getSuspiciousRegexWildcard str = case matchRegex suspicious str of
+        Just [[c]] | not (str `matches` contra) -> Just c
+        _ -> fail "looks good"
+    suspicious = mkRegex "([A-Za-z1-9])\\*"
+    contra = mkRegex "[^a-zA-Z1-9]\\*|[][^$+\\\\]"
 
 
 prop_checkTrapQuotes1 = verify checkTrapQuotes "trap \"echo $num\" INT"
@@ -370,7 +363,7 @@ returnOrExit multi invalid = (f . arguments)
     isInvalid s = null s || any (not . isDigit) s || length s > 5
         || let value = (read s :: Integer) in value > 255
 
-    literal token = fromJust $ getLiteralStringExt lit token
+    literal token = runIdentity $ getLiteralStringExt lit token
     lit (T_DollarBraced {}) = return "0"
     lit (T_DollarArithmetic {}) = return "0"
     lit (T_DollarExpansion {}) = return "0"
@@ -387,7 +380,7 @@ checkFindExecWithSingleArgument = CommandCheck (Basename "find") (f . arguments)
     check (exec:arg:term:_) = do
         execS <- getLiteralString exec
         termS <- getLiteralString term
-        cmdS <- getLiteralStringExt (const $ return " ") arg
+        let cmdS = getLiteralStringDef " " arg
 
         guard $ execS `elem` ["-exec", "-execdir"] && termS `elem` [";", "+"]
         guard $ cmdS `matches` commandRegex
@@ -483,10 +476,10 @@ prop_checkMkdirDashPM20 = verifyNot checkMkdirDashPM "mkdir -p -m 0755 .././bin"
 prop_checkMkdirDashPM21 = verifyNot checkMkdirDashPM "mkdir -p -m 0755 ../../bin"
 checkMkdirDashPM = CommandCheck (Basename "mkdir") check
   where
-    check t = potentially $ do
+    check t = sequence_ $ do
         let flags = getAllFlags t
-        dashP <- find ((\f -> f == "p" || f == "parents") . snd) flags
-        dashM <- find ((\f -> f == "m" || f == "mode") . snd) flags
+        dashP <- find (\(_,f) -> f == "p" || f == "parents") flags
+        dashM <- find (\(_,f) -> f == "m" || f == "mode") flags
         -- mkdir -pm 0700 dir  is fine, so is ../dir, but dir/subdir is not.
         guard $ any couldHaveSubdirs (drop 1 $ arguments t)
         return $ warn (getId $ fst dashM) 2174 "When used with -p, -m only applies to the deepest directory."
@@ -506,10 +499,10 @@ prop_checkNonportableSignals7 = verifyNot checkNonportableSignals "trap 'stop' i
 checkNonportableSignals = CommandCheck (Exactly "trap") (f . arguments)
   where
     f args = case args of
-        first:rest -> unless (isFlag first) $ mapM_ check rest
+        first:rest | not $ isFlag first -> mapM_ check rest
         _ -> return ()
 
-    check param = potentially $ do
+    check param = sequence_ $ do
         str <- getLiteralString param
         let id = getId param
         return $ sequence_ $ mapMaybe (\f -> f id str) [
@@ -543,9 +536,9 @@ checkInteractiveSu = CommandCheck (Basename "su") f
             info (getId cmd) 2117
                 "To run commands as another user, use su -c or sudo."
 
-    undirected (T_Pipeline _ _ l) = length l <= 1
+    undirected (T_Pipeline _ _ (_:_:_)) = False
     -- This should really just be modifications to stdin, but meh
-    undirected (T_Redirecting _ list _) = null list
+    undirected (T_Redirecting _ (_:_) _) = False
     undirected _ = True
 
 
@@ -562,9 +555,8 @@ checkSshCommandString = CommandCheck (Basename "ssh") (f . arguments)
             ([], hostport:r@(_:_)) -> checkArg $ last r
             _ -> return ()
     checkArg (T_NormalWord _ [T_DoubleQuoted id parts]) =
-        case filter (not . isConstant) parts of
-            [] -> return ()
-            (x:_) -> info (getId x) 2029
+        forM_ (find (not . isConstant) parts) $
+            \x -> info (getId x) 2029
                 "Note that, unescaped, this expands on the client side."
     checkArg _ = return ()
 
@@ -597,28 +589,27 @@ checkPrintfVar = CommandCheck (Exactly "printf") (f . arguments) where
     f _ = return ()
 
     check format more = do
-        fromMaybe (return ()) $ do
+        sequence_ $ do
             string <- getLiteralString format
             let formats = getPrintfFormats string
             let formatCount = length formats
             let argCount = length more
 
-            return $
-                case () of
-                    () | argCount == 0 && formatCount == 0 ->
-                        return () -- This is fine
-                    () | formatCount == 0 && argCount > 0 ->
-                        err (getId format) 2182
-                            "This printf format string has no variables. Other arguments are ignored."
-                    () | any mayBecomeMultipleArgs more ->
-                        return () -- We don't know so trust the user
-                    () | argCount < formatCount && onlyTrailingTs formats argCount ->
-                        return () -- Allow trailing %()Ts since they use the current time
-                    () | argCount > 0 && argCount `mod` formatCount == 0 ->
-                        return () -- Great: a suitable number of arguments
-                    () ->
-                        warn (getId format) 2183 $
-                            "This format string has " ++ show formatCount ++ " variables, but is passed " ++ show argCount ++ " arguments."
+            return $ if
+                | argCount == 0 && formatCount == 0 ->
+                    return () -- This is fine
+                | formatCount == 0 && argCount > 0 ->
+                    err (getId format) 2182
+                        "This printf format string has no variables. Other arguments are ignored."
+                | any mayBecomeMultipleArgs more ->
+                    return () -- We don't know so trust the user
+                | argCount < formatCount && onlyTrailingTs formats argCount ->
+                    return () -- Allow trailing %()Ts since they use the current time
+                | argCount > 0 && argCount `mod` formatCount == 0 ->
+                    return () -- Great: a suitable number of arguments
+                | otherwise ->
+                    warn (getId format) 2183 $
+                        "This format string has " ++ show formatCount ++ " variables, but is passed " ++ show argCount ++ " arguments."
 
         unless ('%' `elem` concat (oversimplify format) || isLiteral format) $
           info (getId format) 2059
@@ -686,16 +677,11 @@ prop_checkSetAssignment5 = verifyNot checkSetAssignment "set 'a=5'"
 prop_checkSetAssignment6 = verifyNot checkSetAssignment "set"
 checkSetAssignment = CommandCheck (Exactly "set") (f . arguments)
   where
-    f (var:value:rest) =
-        let str = literal var in
-            when (isVariableName str || isAssignment str) $
-                msg (getId var)
-    f (var:_) =
-        when (isAssignment $ literal var) $
-            msg (getId var)
+    f (var:rest)
+        | (not (null rest) && isVariableName str) || isAssignment str =
+            warn (getId var) 2121 "To assign a variable, use just 'var=value', no 'set ..'."
+      where str = literal var
     f _ = return ()
-
-    msg id = warn id 2121 "To assign a variable, use just 'var=value', no 'set ..'."
 
     isAssignment str = '=' `elem` str
     literal (T_NormalWord _ l) = concatMap literal l
@@ -709,9 +695,8 @@ prop_checkExportedExpansions3 = verifyNot checkExportedExpansions "export foo"
 prop_checkExportedExpansions4 = verifyNot checkExportedExpansions "export ${foo?}"
 checkExportedExpansions = CommandCheck (Exactly "export") (mapM_ check . arguments)
   where
-    check t = potentially $ do
-        var <- getSingleUnmodifiedVariable t
-        let name = bracedString var
+    check t = sequence_ $ do
+        name <- getSingleUnmodifiedBracedString t
         return . warn (getId t) 2163 $
             "This does not export '" ++ name ++ "'. Remove $/${} for that, or use ${var?} to quiet."
 
@@ -731,22 +716,21 @@ checkReadExpansions = CommandCheck (Exactly "read") check
         return [y | (x,y) <- opts, null x || x == "a"]
 
     check cmd = mapM_ warning $ getVars cmd
-    warning t = potentially $ do
-        var <- getSingleUnmodifiedVariable t
-        let name = bracedString var
+    warning t = sequence_ $ do
+        name <- getSingleUnmodifiedBracedString t
         guard $ isVariableName name   -- e.g. not $1
         return . warn (getId t) 2229 $
             "This does not read '" ++ name ++ "'. Remove $/${} for that, or use ${var?} to quiet."
 
 -- Return the single variable expansion that makes up this word, if any.
 -- e.g. $foo -> $foo, "$foo"'' -> $foo , "hello $name" -> Nothing
-getSingleUnmodifiedVariable :: Token -> Maybe Token
-getSingleUnmodifiedVariable word =
+getSingleUnmodifiedBracedString :: Token -> Maybe String
+getSingleUnmodifiedBracedString word =
     case getWordParts word of
-        [t@(T_DollarBraced {})] ->
-            let contents = bracedString t
+        [T_DollarBraced _ _ l] ->
+            let contents = concat $ oversimplify l
                 name = getBracedReference contents
-            in guard (contents == name) >> return t
+            in guard (contents == name) >> return contents
         _ -> Nothing
 
 prop_checkAliasesUsesArgs1 = verify checkAliasesUsesArgs "alias a='cp $1 /a'"
@@ -757,7 +741,7 @@ checkAliasesUsesArgs = CommandCheck (Exactly "alias") (f . arguments)
     re = mkRegex "\\$\\{?[0-9*@]"
     f = mapM_ checkArg
     checkArg arg =
-        let string = fromJust $ getLiteralStringExt (const $ return "_") arg in
+        let string = getLiteralStringDef "_" arg in
             when ('=' `elem` string && string `matches` re) $
                 err (getId arg) 2142
                     "Aliases can't use positional parameters. Use a function."
@@ -770,7 +754,7 @@ checkAliasesExpandEarly = CommandCheck (Exactly "alias") (f . arguments)
   where
     f = mapM_ checkArg
     checkArg arg | '=' `elem` concat (oversimplify arg) =
-        forM_ (take 1 $ filter (not . isLiteral) $ getWordParts arg) $
+        forM_ (find (not . isLiteral) $ getWordParts arg) $
             \x -> warn (getId x) 2139 "This expands when defined, not when used. Consider escaping."
     checkArg _ = return ()
 
@@ -804,7 +788,7 @@ checkFindWithoutPath = CommandCheck (Basename "find") f
     -- path. We assume that all the pre-path flags are single characters from a
     -- list of GNU and macOS flags.
     hasPath (first:rest) =
-        let flag = fromJust $ getLiteralStringExt (const $ return "___") first in
+        let flag = getLiteralStringDef "___" first in
             not ("-" `isPrefixOf` flag) || isLeadingFlag flag && hasPath rest
     hasPath [] = False
     isLeadingFlag flag = length flag <= 2 || all (`elem` leadingFlagChars) flag
@@ -882,7 +866,7 @@ checkWhileGetoptsCase = CommandCheck (Exactly "getopts") f
     f :: Token -> Analysis
     f t@(T_SimpleCommand _ _ (cmd:arg1:_))  = do
         path <- getPathM t
-        potentially $ do
+        sequence_ $ do
             options <- getLiteralString arg1
             (T_WhileExpression _ _ body) <- findFirst whileLoop path
             caseCmd <- mapMaybe findCase body !!! 0
@@ -909,10 +893,10 @@ checkWhileGetoptsCase = CommandCheck (Exactly "getopts") f
     warnUnhandled optId caseId str =
         warn caseId 2213 $ "getopts specified -" ++ str ++ ", but it's not handled by this 'case'."
 
-    warnRedundant (key, expr) = potentially $ do
-        str <- key
-        guard $ str `notElem` ["*", ":", "?"]
-        return $ warn (getId expr) 2214 "This case is not specified by getopts."
+    warnRedundant (Just str, expr)
+        | str `notElem` ["*", ":", "?"] =
+            warn (getId expr) 2214 "This case is not specified by getopts."
+    warnRedundant _ = return ()
 
     getHandledStrings (_, globs, _) =
         map (\x -> (literal x, x)) globs
@@ -968,7 +952,7 @@ checkCatastrophicRm = CommandCheck (Basename "rm") $ \t ->
             Nothing ->
                 checkWord' token
 
-    checkWord' token = fromMaybe (return ()) $ do
+    checkWord' token = sequence_ $ do
         filename <- getPotentialPath token
         let path = fixPath filename
         return . when (path `elem` importantPaths) $
@@ -990,9 +974,9 @@ checkCatastrophicRm = CommandCheck (Basename "rm") $ \t ->
         f _ = return ""
 
     stripTrailing c = reverse . dropWhile (== c) . reverse
-    skipRepeating c (a:b:rest) | a == b && b == c = skipRepeating c (b:rest)
-    skipRepeating c (a:r) = a:skipRepeating c r
-    skipRepeating _ [] = []
+    skipRepeating c = foldr go []
+      where
+        go a r = a : case r of b:rest | b == c && a == b -> rest; _ -> r
 
     paths = [
         "", "/bin", "/etc", "/home", "/mnt", "/usr", "/usr/share", "/usr/local",
@@ -1104,7 +1088,7 @@ prop_checkSudoArgs6 = verifyNot checkSudoArgs "sudo -n -u export ls"
 prop_checkSudoArgs7 = verifyNot checkSudoArgs "sudo docker export foo"
 checkSudoArgs = CommandCheck (Basename "sudo") f
   where
-    f t = potentially $ do
+    f t = sequence_ $ do
         opts <- parseOpts t
         let nonFlags = [x | ("",x) <- opts]
         commandArg <- nonFlags !!! 0
@@ -1132,7 +1116,7 @@ prop_checkChmodDashr3 = verifyNot checkChmodDashr "chmod a-r dir"
 checkChmodDashr = CommandCheck (Basename "chmod") f
   where
     f t = mapM_ check $ arguments t
-    check t = potentially $ do
+    check t = sequence_ $ do
         flag <- getLiteralString t
         guard $ flag == "-r"
         return $ warn (getId t) 2253 "Use -R to recurse, or explicitly a-r to remove read permissions."

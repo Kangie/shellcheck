@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2257
 
 failed=0
 fail() {
@@ -8,7 +9,7 @@ fail() {
 
 if git diff | grep -q ""
 then
-  fail "There are uncommited changes"
+  fail "There are uncommitted changes"
 fi
 
 current=$(git tag --points-at)

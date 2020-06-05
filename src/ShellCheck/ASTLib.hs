@@ -25,6 +25,7 @@ import Control.Monad.Writer
 import Control.Monad
 import Data.Char
 import Data.Functor
+import Data.Functor.Identity
 import Data.List
 import Data.Maybe
 
@@ -46,6 +47,7 @@ willSplit x =
     T_BraceExpansion {} -> True
     T_Glob {} -> True
     T_Extglob {} -> True
+    T_DoubleQuoted _ l -> any willBecomeMultipleArgs l
     T_NormalWord _ l -> any willSplit l
     _ -> False
 
@@ -132,13 +134,9 @@ isUnquotedFlag token = fromMaybe False $ do
     str <- getLeadingUnquotedString token
     return $ "-" `isPrefixOf` str
 
--- Given a T_DollarBraced, return a simplified version of the string contents.
-bracedString (T_DollarBraced _ _ l) = concat $ oversimplify l
-bracedString _ = error "Internal shellcheck error, please report! (bracedString on non-variable)"
-
 -- Is this an expansion of multiple items of an array?
-isArrayExpansion t@(T_DollarBraced _ _ _) =
-    let string = bracedString t in
+isArrayExpansion (T_DollarBraced _ _ l) =
+    let string = concat $ oversimplify l in
         "@" `isPrefixOf` string ||
             not ("#" `isPrefixOf` string) && "[@]" `isInfixOf` string
 isArrayExpansion _ = False
@@ -146,8 +144,8 @@ isArrayExpansion _ = False
 -- Is it possible that this arg becomes multiple args?
 mayBecomeMultipleArgs t = willBecomeMultipleArgs t || f t
   where
-    f t@(T_DollarBraced _ _ _) =
-        let string = bracedString t in
+    f (T_DollarBraced _ _ l) =
+        let string = concat $ oversimplify l in
             "!" `isPrefixOf` string
     f (T_DoubleQuoted _ parts) = any f parts
     f (T_NormalWord _ parts) = any f parts
@@ -175,9 +173,13 @@ willConcatInAssignment token =
 getLiteralString :: Token -> Maybe String
 getLiteralString = getLiteralStringExt (const Nothing)
 
+-- Definitely get a literal string, with a given default for all non-literals
+getLiteralStringDef :: String -> Token -> String
+getLiteralStringDef x = runIdentity . getLiteralStringExt (const $ return x)
+
 -- Definitely get a literal string, skipping over all non-literals
 onlyLiteralString :: Token -> String
-onlyLiteralString = fromJust . getLiteralStringExt (const $ return "")
+onlyLiteralString = getLiteralStringDef ""
 
 -- Maybe get a literal string, but only if it's an unquoted argument.
 getUnquotedLiteral (T_NormalWord _ list) =
@@ -216,7 +218,7 @@ getGlobOrLiteralString = getLiteralStringExt f
 
 -- Maybe get the literal value of a token, using a custom function
 -- to map unrecognized Tokens into strings.
-getLiteralStringExt :: (Token -> Maybe String) -> Token -> Maybe String
+getLiteralStringExt :: Monad m => (Token -> m String) -> Token -> m String
 getLiteralStringExt more = g
   where
     allInList = fmap concat . mapM g
@@ -297,6 +299,11 @@ getCommand t =
 getCommandName :: Token -> Maybe String
 getCommandName = fst . getCommandNameAndToken
 
+-- Maybe get the name+arguments of a command.
+getCommandArgv t = do
+    (T_SimpleCommand _ _ args@(_:_)) <- getCommand t
+    return args
+
 -- Get the command name token from a command, i.e.
 -- the token representing 'ls' in 'ls -la 2> foo'.
 -- If it can't be determined, return the original token.
@@ -306,13 +313,11 @@ getCommandNameAndToken :: Token -> (Maybe String, Token)
 getCommandNameAndToken t = fromMaybe (Nothing, t) $ do
     (T_SimpleCommand _ _ (w:rest)) <- getCommand t
     s <- getLiteralString w
-    if "busybox" `isSuffixOf` s || "builtin" == s
-        then
-            case rest of
-                (applet:_) -> return (getLiteralString applet, applet)
-                _ -> return (Just s, w)
-        else
-            return (Just s, w)
+    return $ case rest of
+        (applet:_) | "busybox" `isSuffixOf` s || "builtin" == s ->
+            (getLiteralString applet, applet)
+        _ ->
+            (Just s, w)
 
 
 -- If a command substitution is a single command, get its name.
@@ -366,19 +371,23 @@ isFunctionLike t =
 isBraceExpansion t = case t of T_BraceExpansion {} -> True; _ -> False
 
 -- Get the lists of commands from tokens that contain them, such as
--- the body of while loops or branches of if statements.
+-- the conditions and bodies of while loops or branches of if statements.
 getCommandSequences :: Token -> [[Token]]
 getCommandSequences t =
     case t of
         T_Script _ _ cmds -> [cmds]
         T_BraceGroup _ cmds -> [cmds]
         T_Subshell _ cmds -> [cmds]
-        T_WhileExpression _ _ cmds -> [cmds]
-        T_UntilExpression _ _ cmds -> [cmds]
+        T_WhileExpression _ cond cmds -> [cond, cmds]
+        T_UntilExpression _ cond cmds -> [cond, cmds]
         T_ForIn _ _ _ cmds -> [cmds]
         T_ForArithmetic _ _ _ _ cmds -> [cmds]
-        T_IfExpression _ thens elses -> map snd thens ++ [elses]
+        T_IfExpression _ thens elses -> (concatMap (\(a,b) -> [a,b]) thens) ++ [elses]
         T_Annotation _ _ t -> getCommandSequences t
+
+        T_DollarExpansion _ cmds -> [cmds]
+        T_DollarBraceCommandExpansion _ cmds -> [cmds]
+        T_Backticked _ cmds -> [cmds]
         _ -> []
 
 -- Get a list of names of associative arrays
@@ -386,13 +395,13 @@ getAssociativeArrays t =
     nub . execWriter $ doAnalysis f t
   where
     f :: Token -> Writer [String] ()
-    f t@T_SimpleCommand {} = fromMaybe (return ()) $ do
+    f t@T_SimpleCommand {} = sequence_ $ do
         name <- getCommandName t
         let assocNames = ["declare","local","typeset"]
-        guard $ elem name assocNames
+        guard $ name `elem` assocNames
         let flags = getAllFlags t
-        guard $ elem "A" $ map snd flags
-        let args = map fst . filter ((==) "" . snd) $ flags
+        guard $ "A" `elem` map snd flags
+        let args = [arg | (arg, "") <- flags]
         let names = mapMaybe (getLiteralStringExt nameAssignments) args
         return $ tell names
     f _ = return ()
@@ -410,25 +419,18 @@ data PseudoGlob = PGAny | PGMany | PGChar Char
 
 -- Turn a word into a PG pattern, replacing all unknown/runtime values with
 -- PGMany.
-wordToPseudoGlob :: Token -> Maybe [PseudoGlob]
+wordToPseudoGlob :: Token -> [PseudoGlob]
 wordToPseudoGlob word =
-    simplifyPseudoGlob . concat <$> mapM f (getWordParts word)
+    simplifyPseudoGlob . concatMap f $ getWordParts word
   where
     f x = case x of
-        T_Literal _ s -> return $ map PGChar s
-        T_SingleQuoted _ s -> return $ map PGChar s
+        T_Literal _ s -> map PGChar s
+        T_SingleQuoted _ s -> map PGChar s
 
-        T_DollarBraced {} -> return [PGMany]
-        T_DollarExpansion {} -> return [PGMany]
-        T_Backticked {} -> return [PGMany]
+        T_Glob _ "?" -> [PGAny]
+        T_Glob _ ('[':_)  -> [PGAny]
 
-        T_Glob _ "?" -> return [PGAny]
-        T_Glob _ ('[':_)  -> return [PGAny]
-        T_Glob {} -> return [PGMany]
-
-        T_Extglob {} -> return [PGMany]
-
-        _ -> return [PGMany]
+        _ -> [PGMany]
 
 -- Turn a word into a PG pattern, but only if we can preserve
 -- exact semantics.
@@ -491,8 +493,7 @@ pseudoGlobIsSuperSetof = matchable
     matchable (PGMany : rest) [] = matchable rest []
     matchable _ _ = False
 
-wordsCanBeEqual x y = fromMaybe True $
-    liftM2 pseudoGlobsCanOverlap (wordToPseudoGlob x) (wordToPseudoGlob y)
+wordsCanBeEqual x y = pseudoGlobsCanOverlap (wordToPseudoGlob x) (wordToPseudoGlob y)
 
 -- Is this an expansion that can be quoted,
 -- e.g. $(foo) `foo` $foo (but not {foo,})?

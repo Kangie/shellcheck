@@ -186,12 +186,12 @@ getNextIdSpanningTokens startTok endTok = do
 
 -- Get an ID starting from the first token of the list, and ending after the last
 getNextIdSpanningTokenList list =
-    if null list
-    then do
+    case list of
+    [] -> do
         pos <- getPosition
         getNextIdBetween pos pos
-    else
-        getNextIdSpanningTokens (head list) (last list)
+    (h:_) ->
+        getNextIdSpanningTokens h (last list)
 
 -- Get the span covered by an id
 getSpanForId :: Monad m => Id -> SCParser m (SourcePos, SourcePos)
@@ -253,7 +253,11 @@ ignoreProblemsOf p = do
 shouldIgnoreCode code = do
     context <- getCurrentContexts
     checkSourced <- Mr.asks checkSourced
-    return $ any (disabling checkSourced) context
+    return $ any (contextItemDisablesCode checkSourced code) context
+
+-- Does this item on the context stack disable warnings for 'code'?
+contextItemDisablesCode :: Bool -> Integer -> Context -> Bool
+contextItemDisablesCode alsoCheckSourced code = disabling alsoCheckSourced
   where
     disabling checkSourced item =
         case item of
@@ -262,6 +266,8 @@ shouldIgnoreCode code = do
             _ -> False
     disabling' (DisableComment n) = code == n
     disabling' _ = False
+
+
 
 getCurrentAnnotations includeSource =
     concatMap get . takeWhile (not . isBoundary) <$> getCurrentContexts
@@ -373,10 +379,7 @@ parseNoteAtId id c l a = do
 parseNoteAtWithEnd start end c l a = addParseNote $ ParseNote start end c l a
 
 --------- Convenient combinators
-thenSkip main follow = do
-    r <- main
-    optional follow
-    return r
+thenSkip main follow = main <* optional follow
 
 unexpecting s p = try $
     (try p >> fail ("Unexpected " ++ s)) <|> return ()
@@ -420,7 +423,7 @@ acceptButWarn parser level code note =
 
 parsecBracket before after op = do
     val <- before
-    (op val <* optional (after val)) <|> (after val *> fail "")
+    op val `thenSkip` after val <|> (after val *> fail "")
 
 swapContext contexts p =
     parsecBracket (getCurrentContexts <* setCurrentContexts contexts)
@@ -586,7 +589,7 @@ readConditionContents single =
             return $ TC_Nullary id typ x
           )
 
-    checkTrailingOp x = fromMaybe (return ()) $ do
+    checkTrailingOp x = sequence_ $ do
         (T_Literal id str) <- getTrailingUnquotedLiteral x
         trailingOp <- find (`isSuffixOf` str) binaryTestOps
         return $ parseProblemAtId id ErrorC 1108 $
@@ -1554,7 +1557,7 @@ readDollarExpression = do
 readDollarExp = arithmetic <|> readDollarExpansion <|> readDollarBracket <|> readDollarBraceCommandExpansion <|> readDollarBraced <|> readDollarVariable
   where
     arithmetic = readAmbiguous "$((" readDollarArithmetic readDollarExpansion (\pos ->
-        parseNoteAt pos WarningC 1102 "Shells disambiguate $(( differently or not at all. For $(command substition), add space after $( . For $((arithmetics)), fix parsing errors.")
+        parseNoteAt pos ErrorC 1102 "Shells disambiguate $(( differently or not at all. For $(command substition), add space after $( . For $((arithmetics)), fix parsing errors.")
 
 prop_readDollarSingleQuote = isOk readDollarSingleQuote "$'foo\\\'lol'"
 readDollarSingleQuote = called "$'..' expression" $ do
@@ -1826,7 +1829,7 @@ readPendingHereDocs = do
             let thereIsNoTrailer = null trailingSpace && null trailer
             let leaderIsOk = null leadingSpace
                     || dashed == Dashed && leadingSpacesAreTabs
-            let trailerStart = if null trailer then '\0' else head trailer
+            let trailerStart = case trailer of [] -> '\0'; (h:_) -> h
             let hasTrailingSpace = not $ null trailingSpace
             let hasTrailer = not $ null trailer
             let ppt = parseProblemAt trailerPos ErrorC
@@ -2056,7 +2059,7 @@ readSimpleCommand = called "simple command" $ do
             firstArgument <- ignoreProblemsOf . optionMaybe . try . lookAhead $ readCmdWord
             suffix <- option [] $ getParser readCmdSuffix
                     -- If `export` or other modifier commands are called with `builtin` we have to look at the first argument
-                    (if isCommand ["builtin"] cmd && isJust firstArgument then fromJust firstArgument else cmd) [
+                    (if isCommand ["builtin"] cmd then fromMaybe cmd firstArgument else cmd) [
                         (["declare", "export", "local", "readonly", "typeset"], readModifierSuffix),
                         (["time"], readTimeSuffix),
                         (["let"], readLetSuffix),
@@ -2304,6 +2307,7 @@ prop_readIfClause2 = isWarning readIfClause "if false; then; echo oo; fi"
 prop_readIfClause3 = isWarning readIfClause "if false; then true; else; echo lol; fi"
 prop_readIfClause4 = isWarning readIfClause "if false; then true; else if true; then echo lol; fi; fi"
 prop_readIfClause5 = isOk readIfClause "if false; then true; else\nif true; then echo lol; fi; fi"
+prop_readIfClause6 = isWarning readIfClause "if true\nthen\nDo the thing\nfi"
 readIfClause = called "if expression" $ do
     start <- startSpan
     pos <- getPosition
@@ -2624,7 +2628,7 @@ readFunctionDefinition = called "function" $ do
 
         readWithoutFunction = try $ do
             name <- many1 functionChars
-            guard $ name /= "time"  -- Interfers with time ( foo )
+            guard $ name /= "time"  -- Interferes with time ( foo )
             spacing
             readParens
             return $ \id -> T_Function id (FunctionKeyword False) (FunctionParentheses True) name
@@ -2672,7 +2676,7 @@ readCompoundCommand = do
     cmd <- choice [
         readBraceGroup,
         readAmbiguous "((" readArithmeticExpression readSubshell (\pos ->
-            parseNoteAt pos WarningC 1105 "Shells disambiguate (( differently or not at all. For subshell, add spaces around ( . For ((, fix parsing errors."),
+            parseNoteAt pos ErrorC 1105 "Shells disambiguate (( differently or not at all. For subshell, add spaces around ( . For ((, fix parsing errors."),
         readSubshell,
         readCondition,
         readWhileClause,
@@ -2890,6 +2894,7 @@ redirToken c t = try $ do
 
 tryWordToken s t = tryParseWordToken s t `thenSkip` spacing
 tryParseWordToken keyword t = try $ do
+    pos <- getPosition
     start <- startSpan
     str <- anycaseString keyword
     id <- endSpan start
@@ -2905,9 +2910,10 @@ tryParseWordToken keyword t = try $ do
             _ -> return ()
 
     lookAhead keywordSeparator
-    when (str /= keyword) $
-        parseProblem ErrorC 1081 $
-            "Scripts are case sensitive. Use '" ++ keyword ++ "', not '" ++ str ++ "'."
+    when (str /= keyword) $ do
+        parseProblemAt pos ErrorC 1081 $
+            "Scripts are case sensitive. Use '" ++ keyword ++ "', not '" ++ str ++ "' (or quote if literal)."
+        fail ""
     return $ t id
 
 anycaseString =
@@ -3313,16 +3319,21 @@ parseShell env name contents = do
                 prRoot = Just $
                     reattachHereDocs script (hereDocMap userstate)
             }
-        Left err ->
+        Left err -> do
+            let context = contextStack state
             return newParseResult {
                 prComments =
                     map toPositionedComment $
-                        notesForContext (contextStack state)
-                        ++ [makeErrorFor err]
+                        (filter (not . isIgnored context) $
+                            notesForContext context
+                            ++ [makeErrorFor err])
                         ++ parseProblems state,
                 prTokenPositions = Map.empty,
                 prRoot = Nothing
             }
+  where
+    -- A final pass for ignoring parse errors after failed parsing
+    isIgnored stack note = any (contextItemDisablesCode False (codeForParseNote note)) stack
 
 notesForContext list = zipWith ($) [first, second] $ filter isName list
   where

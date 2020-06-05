@@ -108,7 +108,7 @@ not warn at all, as `ksh` supports decimals in arithmetic contexts.
 
 **-x**,\ **--external-sources**
 
-:   Follow 'source' statements even when the file is not specified as input.
+:   Follow `source` statements even when the file is not specified as input.
     By default, `shellcheck` will only follow files specified on the command
     line (plus `/dev/null`). This option allows following any file the script
     may `source`.
@@ -255,7 +255,7 @@ Valid keys are:
 **shell**
 :   Overrides the shell detected from the shebang.  This is useful for
     files meant to be included (and thus lacking a shebang), or possibly
-    as a more targeted alternative to 'disable=2039'.
+    as a more targeted alternative to 'disable=SC2039'.
 
 # RC FILES
 
@@ -302,7 +302,7 @@ invocation.
 
 # RETURN VALUES
 
-ShellCheck uses the follow exit codes:
+ShellCheck uses the following exit codes:
 
 + 0: All files successfully scanned with no issues.
 + 1: All files successfully scanned with some issues.

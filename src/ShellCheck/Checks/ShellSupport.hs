@@ -30,6 +30,7 @@ import ShellCheck.Regex
 import Control.Monad
 import Control.Monad.RWS
 import Data.Char
+import Data.Functor.Identity
 import Data.List
 import Data.Maybe
 import qualified Data.Map as Map
@@ -73,7 +74,7 @@ prop_checkForDecimals2 = verify checkForDecimals "foo[1.2]=bar"
 prop_checkForDecimals3 = verifyNot checkForDecimals "declare -A foo; foo[1.2]=bar"
 checkForDecimals = ForShell [Sh, Dash, Bash] f
   where
-    f t@(TA_Expansion id _) = potentially $ do
+    f t@(TA_Expansion id _) = sequence_ $ do
         str <- getLiteralString t
         first <- str !!! 0
         guard $ isDigit first && '.' `elem` str
@@ -242,7 +243,7 @@ checkBashisms = ForShell [Sh, Dash] $ \t -> do
         when (isBashVariable var) $
                     warnMsg id $ var ++ " is"
       where
-        str = bracedString t
+        str = concat $ oversimplify token
         var = getBracedReference str
         check (regex, feature) =
             when (isJust $ matchRegex regex str) $ warnMsg id feature
@@ -288,10 +289,11 @@ checkBashisms = ForShell [Sh, Dash] $ \t -> do
         -- Get the literal options from a list of arguments,
         -- up until the first non-literal one
         getLiteralArgs :: [Token] -> [(Id, String)]
-        getLiteralArgs (first:rest) = fromMaybe [] $ do
-            str <- getLiteralString first
-            return $ (getId first, str) : getLiteralArgs rest
-        getLiteralArgs [] = []
+        getLiteralArgs = foldr go []
+          where
+            go first rest = case getLiteralString first of
+                Just str -> (getId first, str) : rest
+                Nothing -> []
 
         -- Check a flag-option pair (such as -o errexit)
         checkOptions (flag@(fid,flag') : opt@(oid,opt') : rest)
@@ -337,7 +339,7 @@ checkBashisms = ForShell [Sh, Dash] $ \t -> do
         in do
             when (name `elem` unsupportedCommands) $
                 warnMsg id $ "'" ++ name ++ "' is"
-            potentially $ do
+            sequence_ $ do
                 allowed' <- Map.lookup name allowedFlags
                 allowed <- allowed'
                 (word, flag) <- find
@@ -347,7 +349,7 @@ checkBashisms = ForShell [Sh, Dash] $ \t -> do
             when (name == "source") $ warnMsg id "'source' in place of '.' is"
             when (name == "trap") $
                 let
-                    check token = potentially $ do
+                    check token = sequence_ $ do
                         str <- getLiteralString token
                         let upper = map toUpper str
                         return $ do
@@ -362,7 +364,7 @@ checkBashisms = ForShell [Sh, Dash] $ \t -> do
                 in
                     mapM_ check (drop 1 rest)
 
-            when (name == "printf") $ potentially $ do
+            when (name == "printf") $ sequence_ $ do
                 format <- rest !!! 0  -- flags are covered by allowedFlags
                 let literal = onlyLiteralString format
                 guard $ "%q" `isInfixOf` literal
@@ -389,11 +391,10 @@ checkBashisms = ForShell [Sh, Dash] $ \t -> do
             ("unset", Just ["f", "v"]),
             ("wait", Just [])
             ]
-    bashism t@(T_SourceCommand id src _) =
-        let name = fromMaybe "" $ getCommandName src
-        in when (name == "source") $ warnMsg id "'source' in place of '.' is"
-    bashism (TA_Expansion _ (T_Literal id str : _)) | str `matches` radix =
-        when (str `matches` radix) $ warnMsg id "arithmetic base conversion is"
+    bashism t@(T_SourceCommand id src _)
+        | getCommandName src == Just "source" = warnMsg id "'source' in place of '.' is"
+    bashism (TA_Expansion _ (T_Literal id str : _))
+        | str `matches` radix = warnMsg id "arithmetic base conversion is"
       where
         radix = mkRegex "^[0-9]+#"
     bashism _ = return ()
@@ -456,11 +457,10 @@ checkEchoSed = ForShell [Bash, Ksh] f
 
     -- This should have used backreferences, but TDFA doesn't support them
     sedRe = mkRegex "^s(.)([^\n]*)g?$"
-    isSimpleSed s = fromMaybe False $ do
-        [first,rest] <- matchRegex sedRe s
-        let delimiters = filter (== head first) rest
+    isSimpleSed s = isJust $ do
+        [h:_,rest] <- matchRegex sedRe s
+        let delimiters = filter (== h) rest
         guard $ length delimiters == 2
-        return True
     checkIn id s =
         when (isSimpleSed s) $
             style id 2001 "See if you can use ${variable//search/replace} instead."
@@ -488,7 +488,7 @@ checkBraceExpansionVars = ForShell [Bash] f
             T_DollarExpansion {} -> return "$"
             T_DollarArithmetic {} -> return "$"
             _ -> return "-"
-    toString t = fromJust $ getLiteralStringExt literalExt t
+    toString t = runIdentity $ getLiteralStringExt literalExt t
     isEvaled t = do
         cmd <- getClosestCommandM t
         return $ maybe False (`isUnqualifiedCommand` "eval") cmd
@@ -506,13 +506,13 @@ checkMultiDimensionalArrays = ForShell [Bash] f
         case token of
             T_Assignment _ _ name (first:second:_) _ -> about second
             T_IndexedElement _ (first:second:_) _ -> about second
-            T_DollarBraced {} ->
-                when (isMultiDim token) $ about token
+            T_DollarBraced _ _ l ->
+                when (isMultiDim l) $ about token
             _ -> return ()
     about t = warn (getId t) 2180 "Bash does not support multidimensional arrays. Use 1D or associative arrays."
 
     re = mkRegex "^\\[.*\\]\\[.*\\]"  -- Fixme, this matches ${foo:- [][]} and such as well
-    isMultiDim t = getBracedModifier (bracedString t) `matches` re
+    isMultiDim l = getBracedModifier (concat $ oversimplify l) `matches` re
 
 prop_checkPS11 = verify checkPS1Assignments "PS1='\\033[1;35m\\$ '"
 prop_checkPS11a= verify checkPS1Assignments "export PS1='\\033[1;35m\\$ '"

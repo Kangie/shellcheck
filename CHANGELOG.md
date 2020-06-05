@@ -1,4 +1,15 @@
-## v0.7.1 - soon
+## Git
+### Added
+- SC2259/SC2260: Warn when redirections override pipes
+- SC2261: Warn about multiple competing redirections
+- SC2262/SC2263: Warn about aliases declared and used in the same parsing unit
+
+### Fixed
+- SC1072/SC1073 now respond to disable annotations, though ignoring parse errors
+  is still purely cosmetic and does not allow ShellCheck to continue.
+
+
+## v0.7.1 - 2020-04-04
 ### Fixed
 - `-f diff` no longer claims that it found more issues when it didn't
 - Known empty variables now correctly trigger SC2086
@@ -7,12 +18,17 @@
   called with `builtin`
 
 ### Added
+- SC1136: Warn about unexpected characters after ]/]]
 - SC2254: Suggest quoting expansions in case statements
 - SC2255: Suggest using `$((..))` in `[ 2*3 -eq 6 ]`
 - SC2256: Warn about translated strings that are known variables
+- SC2257: Warn about arithmetic mutation in redirections
+- SC2258: Warn about trailing commas in for loop elements
 
 ### Changed
-- SC2230: This check is now off by default
+- SC2230: 'command -v' suggestion is now off by default (-i deprecate-which)
+- SC1081: Keywords are now correctly parsed case sensitively, with a warning
+
 
 ## v0.7.0 - 2019-07-28
 ### Added
