@@ -260,6 +260,12 @@ verifyTree f s = producesComments f s == Just True
 verifyNotTree :: (Parameters -> Token -> [TokenComment]) -> String -> Bool
 verifyNotTree f s = producesComments f s == Just False
 
+-- Takes a regular checker function and a Parameters and returns a new
+-- checker function that acts as though portage mode had been passed
+-- in the parameters.
+withPortageParams :: (Parameters -> Token -> Writer [TokenComment] ()) -> Parameters -> (Token -> Writer [TokenComment] ())
+withPortageParams f p = f $ p { portageFileType = Ebuild False }
+
 checkCommand str f t@(T_SimpleCommand id _ (cmd:rest))
     | t `isCommand` str = f cmd rest
 checkCommand _ _ _ = return ()
@@ -691,6 +697,8 @@ prop_checkUnquotedExpansions6 = verifyNot checkUnquotedExpansions "$(cmd)"
 prop_checkUnquotedExpansions7 = verifyNot checkUnquotedExpansions "cat << foo\n$(ls)\nfoo"
 prop_checkUnquotedExpansions8 = verifyNot checkUnquotedExpansions "set -- $(seq 1 4)"
 prop_checkUnquotedExpansions9 = verifyNot checkUnquotedExpansions "echo foo `# inline comment`"
+prop_checkUnquotedExpansionsUsev = verify checkUnquotedExpansions "echo $(usev X)"
+prop_checkUnquotedExpansionsPortageUsev = verifyNot (withPortageParams checkUnquotedExpansions) "echo $(usev X)"
 checkUnquotedExpansions params =
     check
   where
@@ -700,11 +708,13 @@ checkUnquotedExpansions params =
     check _ = return ()
     tree = parentMap params
     examine t contents =
-        unless (null contents || shouldBeSplit t || isQuoteFree tree t || usedAsCommandName tree t) $
+        unless (null contents || shouldBeSplit t || isQuoteFree tree t || usedAsCommandName tree t || commandNeverProducesSpaces t) $
             warn (getId t) 2046 "Quote this to prevent word splitting."
 
     shouldBeSplit t =
         getCommandNameFromExpansion t == Just "seq"
+    commandNeverProducesSpaces t =
+        isPortageBuild params && getCommandNameFromExpansion t == Just "usev"
 
 
 prop_checkRedirectToSame = verify checkRedirectToSame "cat foo > foo"
