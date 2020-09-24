@@ -1939,7 +1939,7 @@ warnStableKeywords :: Token -> Writer [TokenComment] ()
 warnStableKeywords (T_Assignment _ Assign "KEYWORDS" []
                     (T_NormalWord _ [T_DoubleQuoted id [(T_Literal _ keywords)]]))
   | any isStableKeyword (words keywords) =
-    tell [makeComment ErrorC id 3000 $
+    tell [makeComment ErrorC id 5000 $
       "All KEYWORDS in -9999.ebuild files inheriting from cros-workon must " ++
       "be marked as unstable (~*, ~amd64, etc...), or broken (-*, -amd64, etc...)."]
 warnStableKeywords _ = return ()
