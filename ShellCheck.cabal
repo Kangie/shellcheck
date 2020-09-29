@@ -83,6 +83,7 @@ library
       ShellCheck.Regex
     other-modules:
       Paths_ShellCheck
+      ShellCheck.PortageAutoInternalVariables
 
 executable shellcheck
     if impl(ghc < 8.0)
