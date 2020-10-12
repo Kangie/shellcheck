@@ -851,7 +851,7 @@ checkArrayAsString _ (T_Assignment id _ _ _ word) =
           "Brace expansions and globs are literal in assignments. Quote it or use an array."
 checkArrayAsString _ _ = return ()
 
-arrayVariables params =
+allArrayVariables params =
     shellArrayVariables ++
     if isPortageBuild params then portageArrayVariables else []
 
@@ -868,7 +868,8 @@ prop_checkArrayWithoutIndex10= verifyTree checkArrayWithoutIndex "read -ra arr <
 checkArrayWithoutIndex params _ =
     doVariableFlowAnalysis readF writeF defaultMap (variableFlow params)
   where
-    defaultMap = Map.fromList $ map (\x -> (x,())) (arrayVariables params)
+    defaultMap = Map.fromList $ map (\x -> (x,())) arrayVariables
+    arrayVariables = allArrayVariables params
     readF _ (T_DollarBraced id _ token) _ = do
         map <- get
         return . maybeToList $ do
@@ -1895,7 +1896,7 @@ checkSpacefulness params = checkSpacefulness' onFind params
     bracedString (T_DollarBraced _ _ l) = concat $ oversimplify l
     bracedString _ = error "Internal shellcheck error, please report! (bracedString on non-variable)"
 
-variablesWithoutSpaces params =
+allVariablesWithoutSpaces params =
     shellVariablesWithoutSpaces ++
     if isPortageBuild params then portageVariablesWithoutSpaces else []
 
@@ -1954,7 +1955,8 @@ checkSpacefulness'
 checkSpacefulness' onFind params t =
     doVariableFlowAnalysis readF writeF (Map.fromList defaults) (variableFlow params)
   where
-    defaults = zip (variablesWithoutSpaces params) (repeat SpaceNone)
+    defaults = zip variablesWithoutSpaces (repeat SpaceNone)
+    variablesWithoutSpaces = allVariablesWithoutSpaces params
 
     hasSpaces name = gets (Map.findWithDefault SpaceSome name)
 
@@ -2167,7 +2169,7 @@ checkFunctionsUsedExternally params t =
             info definitionId 2032 $
               "Use own script or sh -c '..' to run this from " ++ cmd ++ "."
 
-internalVariables params =
+allInternalVariables params =
     genericInternalVariables ++
     if shellType params == Ksh then kshInternalVariables else [] ++
     if isPortageBuild params then portageInternalVariables else []
@@ -2240,7 +2242,8 @@ checkUnusedAssignments params t = execWriter (mapM_ warnFor unused)
             name ++ " appears unused. Verify use (or export if used externally)."
 
     stripSuffix = takeWhile isVariableChar
-    defaultMap = Map.fromList $ zip (internalVariables params) $ repeat ()
+    defaultMap = Map.fromList $ zip internalVariables $ repeat ()
+    internalVariables = allInternalVariables params
 
 prop_checkUnassignedReferences1 = verifyTree checkUnassignedReferences "echo $foo"
 prop_checkUnassignedReferences2 = verifyNotTree checkUnassignedReferences "foo=hello; echo $foo"
@@ -2287,7 +2290,8 @@ checkUnassignedReferences = checkUnassignedReferences' False
 checkUnassignedReferences' includeGlobals params t = warnings
   where
     (readMap, writeMap) = execState (mapM tally $ variableFlow params) (Map.empty, Map.empty)
-    defaultAssigned = Map.fromList $ map (\a -> (a, ())) $ filter (not . null) (internalVariables params)
+    defaultAssigned = Map.fromList $ map (\a -> (a, ())) $ filter (not . null) internalVariables
+    internalVariables = allInternalVariables params
 
     tally (Assignment (_, _, name, _))  =
         modify (\(read, written) -> (read, Map.insert name () written))
@@ -3291,12 +3295,13 @@ checkSplittingInArrays params t =
         T_DollarBraced id _ str |
             not (isCountingReference part)
             && not (isQuotedAlternativeReference part)
-            && getBracedReference (concat $ oversimplify str) `notElem` (variablesWithoutSpaces params)
+            && getBracedReference (concat $ oversimplify str) `notElem` variablesWithoutSpaces
             -> warn id 2206 $
                 if shellType params == Ksh
                 then "Quote to prevent word splitting/globbing, or split robustly with read -A or while read."
                 else "Quote to prevent word splitting/globbing, or split robustly with mapfile or read -a."
         _ -> return ()
+    variablesWithoutSpaces = allVariablesWithoutSpaces params
 
     forCommand id =
         warn id 2207 $
