@@ -118,7 +118,7 @@ portageManualInternalVariables = [
     "RESTRICT_PYTHON_ABIS", "PYTHON_MODNAME"
   ]
 
-portageInternalVariables = portageManualInternalVariables ++ portageAutoInternalVariables
+portageInternalVariables = portageManualInternalVariables ++ concat(map snd portageAutoInternalVariables)
 
 specialVariablesWithoutSpaces = [
     "$", "-", "?", "!", "#"
