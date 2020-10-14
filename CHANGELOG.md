@@ -1,12 +1,21 @@
 ## Git
 ### Added
+- `disable` directives can now be a range, e.g. `disable=SC3000-SC4000`
 - SC2259/SC2260: Warn when redirections override pipes
 - SC2261: Warn about multiple competing redirections
 - SC2262/SC2263: Warn about aliases declared and used in the same parsing unit
+- SC2264: Warn about wrapper functions that blatantly recurse
+- SC2265/SC2266: Warn when using & or | with test statements
 
 ### Fixed
 - SC1072/SC1073 now respond to disable annotations, though ignoring parse errors
   is still purely cosmetic and does not allow ShellCheck to continue.
+
+### Changed
+- Assignments are now parsed to spec, without leniency for leading $ or spaces
+- POSIX/dash unsupported feature warnings now have individual SC3xxx codes
+- SC1090: A leading `$x/` or `$(x)/` is now treated as `./` when locating files
+- SC2154: Variables appearing in -z/-n tests are no longer considered unassigned
 
 
 ## v0.7.1 - 2020-04-04

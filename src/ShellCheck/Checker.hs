@@ -232,6 +232,12 @@ prop_cantSourceDynamic =
 prop_cantSourceDynamic2 =
     [1090] == checkWithIncludes [("lib", "")] "source ~/foo"
 
+prop_canStripPrefixAndSource =
+    null $ checkWithIncludes [("./lib", "")] "source \"$MYDIR/lib\""
+
+prop_canStripPrefixAndSource2 =
+    null $ checkWithIncludes [("./utils.sh", "")] "source \"$(dirname \"${BASH_SOURCE[0]}\")/utils.sh\""
+
 prop_canSourceDynamicWhenRedirected =
     null $ checkWithIncludes [("lib", "")] "#shellcheck source=lib\n. \"$1\""
 
@@ -273,7 +279,7 @@ prop_filewideAnnotation8 = null $
     check "# Disable $? warning\n#shellcheck disable=SC2181\n# Disable quoting warning\n#shellcheck disable=2086\ntrue\n[ $? == 0 ] && echo $1"
 
 prop_sourcePartOfOriginalScript = -- #1181: -x disabled posix warning for 'source'
-    2039 `elem` checkWithIncludes [("./saywhat.sh", "echo foo")] "#!/bin/sh\nsource ./saywhat.sh"
+    3046 `elem` checkWithIncludes [("./saywhat.sh", "echo foo")] "#!/bin/sh\nsource ./saywhat.sh"
 
 prop_spinBug1413 = null $ check "fun() {\n# shellcheck disable=SC2188\n> /dev/null\n}\n"
 

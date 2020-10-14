@@ -192,6 +192,8 @@ nodeChecks = [
     ,checkUselessBang
     ,checkTranslatedStringVariable
     ,checkModifiedArithmeticInRedirection
+    ,checkBlatantRecursion
+    ,checkBadTestAndOr
     ]
 
 optionalChecks = map fst optionalTreeChecks
@@ -958,11 +960,13 @@ prop_checkSingleQuotedVariables18= verifyNot checkSingleQuotedVariables "echo '`
 prop_checkSingleQuotedVariables19= verifyNot checkSingleQuotedVariables "echo '```'"
 prop_checkSingleQuotedVariables20= verifyNot checkSingleQuotedVariables "mumps -run %XCMD 'W $O(^GLOBAL(5))'"
 prop_checkSingleQuotedVariables21= verifyNot checkSingleQuotedVariables "mumps -run LOOP%XCMD --xec 'W $O(^GLOBAL(6))'"
-prop_checkSingleQuotedVariables22= verifyNot checkSingleQuotedVariables "python_gen_any_dep 'dev-python/pyyaml[${PYTHON_USEDEP}]'"
-prop_checkSingleQuotedVariables23= verifyNot checkSingleQuotedVariables "python_gen_cond_dep 'dev-python/unittest2[${PYTHON_USEDEP}]' python2_7 pypy"
-prop_checkSingleQuotedVariables24= verifyNot checkSingleQuotedVariables "version_format_string '${PN}_source_$1_$2-$3_$4'"
-
-
+prop_checkSingleQuotedVariables22= verifyNot checkSingleQuotedVariables "jq '$__loc__'"
+prop_checkSingleQuotedVariables23= verifyNot checkSingleQuotedVariables "command jq '$__loc__'"
+prop_checkSingleQuotedVariables24= verifyNot checkSingleQuotedVariables "exec jq '$__loc__'"
+prop_checkSingleQuotedVariables25= verifyNot checkSingleQuotedVariables "exec -c -a foo jq '$__loc__'"
+prop_checkSingleQuotedVariablesCros1= verifyNot checkSingleQuotedVariables "python_gen_any_dep 'dev-python/pyyaml[${PYTHON_USEDEP}]'"
+prop_checkSingleQuotedVariablesCros2= verifyNot checkSingleQuotedVariables "python_gen_cond_dep 'dev-python/unittest2[${PYTHON_USEDEP}]' python2_7 pypy"
+prop_checkSingleQuotedVariablesCros3= verifyNot checkSingleQuotedVariables "version_format_string '${PN}_source_$1_$2-$3_$4'"
 
 
 checkSingleQuotedVariables params t@(T_SingleQuoted id s) =
@@ -1231,6 +1235,9 @@ prop_checkConstantIfs6 = verifyNot checkConstantIfs "[[ a -ot b ]]"
 prop_checkConstantIfs7 = verifyNot checkConstantIfs "[ a -nt b ]"
 prop_checkConstantIfs8 = verifyNot checkConstantIfs "[[ ~foo == '~foo' ]]"
 prop_checkConstantIfs9 = verify checkConstantIfs "[[ *.png == [a-z] ]]"
+prop_checkConstantIfs10 = verifyNot checkConstantIfs "[[ ~me == ~+ ]]"
+prop_checkConstantIfs11 = verifyNot checkConstantIfs "[[ ~ == ~+ ]]"
+prop_checkConstantIfs12 = verify checkConstantIfs "[[ '~' == x ]]"
 checkConstantIfs _ (TC_Binary id typ op lhs rhs) | not isDynamic =
     if isConstant lhs && isConstant rhs
         then  warn id 2050 "This expression is constant. Did you forget the $ on a variable?"
@@ -1699,30 +1706,25 @@ checkSpuriousExec _ = doLists
         doList tail True
     doList' _ _ = return ()
 
-    commentIfExec (T_Pipeline id _ list) =
-      mapM_ commentIfExec $ take 1 list
-    commentIfExec (T_Redirecting _ _ f@(
-      T_SimpleCommand id _ (cmd:arg:_)))
-        | f `isUnqualifiedCommand` "exec" =
-          warn id 2093
-            "Remove \"exec \" if script should continue after this command."
+    commentIfExec (T_Pipeline id _ [c]) = commentIfExec c
+    commentIfExec (T_Redirecting _ _ (T_SimpleCommand id _ (cmd:additionalArg:_))) |
+        getLiteralString cmd == Just "exec" =
+            warn id 2093 "Remove \"exec \" if script should continue after this command."
     commentIfExec _ = return ()
 
 
 prop_checkSpuriousExpansion1 = verify checkSpuriousExpansion "if $(true); then true; fi"
-prop_checkSpuriousExpansion2 = verify checkSpuriousExpansion "while \"$(cmd)\"; do :; done"
 prop_checkSpuriousExpansion3 = verifyNot checkSpuriousExpansion "$(cmd) --flag1 --flag2"
 prop_checkSpuriousExpansion4 = verify checkSpuriousExpansion "$((i++))"
 checkSpuriousExpansion _ (T_SimpleCommand _ _ [T_NormalWord _ [word]]) = check word
   where
     check word = case word of
         T_DollarExpansion id _ ->
-            warn id 2091 "Remove surrounding $() to avoid executing output."
+            warn id 2091 "Remove surrounding $() to avoid executing output (or use eval if intentional)."
         T_Backticked id _ ->
-            warn id 2092 "Remove backticks to avoid executing output."
+            warn id 2092 "Remove backticks to avoid executing output (or use eval if intentional)."
         T_DollarArithmetic id _ ->
             err id 2084 "Remove '$' or use '_=$((expr))' to avoid executing output."
-        T_DoubleQuoted id [subword] -> check subword
         _ -> return ()
 checkSpuriousExpansion _ _ = return ()
 
@@ -2119,17 +2121,26 @@ prop_checkFunctionsUsedExternally6 =
   verifyNotTree checkFunctionsUsedExternally "foo() { :; }; ssh host echo foo"
 prop_checkFunctionsUsedExternally7 =
   verifyNotTree checkFunctionsUsedExternally "install() { :; }; sudo apt-get install foo"
+prop_checkFunctionsUsedExternally8 =
+  verifyTree checkFunctionsUsedExternally "foo() { :; }; command sudo foo"
+prop_checkFunctionsUsedExternally9 =
+  verifyTree checkFunctionsUsedExternally "foo() { :; }; exec -c sudo foo"
 checkFunctionsUsedExternally params t =
     runNodeAnalysis checkCommand params t
   where
-    checkCommand _ t@(T_SimpleCommand _ _ (cmd:args)) =
-        case getCommandBasename t of
-            Just name -> do
+    checkCommand _ t@(T_SimpleCommand _ _ argv) =
+        case getCommandNameAndToken False t of
+            (Just str, t) -> do
+                let name = basename str
+                let args = skipOver t argv
                 let argStrings = map (\x -> (fromMaybe "" $ getLiteralString x, x)) args
                 let candidates = getPotentialCommands name argStrings
                 mapM_ (checkArg name) candidates
             _ -> return ()
     checkCommand _ _ = return ()
+
+    skipOver t list = drop 1 $ dropWhile (\c -> getId c /= id) $ list
+      where id = getId t
 
     -- Try to pick out the argument[s] that may be commands
     getPotentialCommands name argAndString =
@@ -2285,6 +2296,15 @@ prop_checkUnassignedReferences37= verifyNotTree checkUnassignedReferences "var=h
 prop_checkUnassignedReferences38= verifyTree (checkUnassignedReferences' True) "echo $VAR"
 prop_checkUnassignedReferences39= verifyNotTree checkUnassignedReferences "builtin export var=4; echo $var"
 prop_checkUnassignedReferences40= verifyNotTree checkUnassignedReferences ": ${foo=bar}"
+prop_checkUnassignedReferences41= verifyNotTree checkUnassignedReferences "mapfile -t files 123; echo \"${files[@]}\""
+prop_checkUnassignedReferences42= verifyNotTree checkUnassignedReferences "mapfile files -t; echo \"${files[@]}\""
+prop_checkUnassignedReferences43= verifyNotTree checkUnassignedReferences "mapfile --future files; echo \"${files[@]}\""
+prop_checkUnassignedReferences_minusNPlain   = verifyNotTree checkUnassignedReferences "if [ -n \"$x\" ]; then echo $x; fi"
+prop_checkUnassignedReferences_minusZPlain   = verifyNotTree checkUnassignedReferences "if [ -z \"$x\" ]; then echo \"\"; fi"
+prop_checkUnassignedReferences_minusNBraced  = verifyNotTree checkUnassignedReferences "if [ -n \"${x}\" ]; then echo $x; fi"
+prop_checkUnassignedReferences_minusZBraced  = verifyNotTree checkUnassignedReferences "if [ -z \"${x}\" ]; then echo \"\"; fi"
+prop_checkUnassignedReferences_minusNDefault = verifyNotTree checkUnassignedReferences "if [ -n \"${x:-}\" ]; then echo $x; fi"
+prop_checkUnassignedReferences_minusZDefault = verifyNotTree checkUnassignedReferences "if [ -z \"${x:-}\" ]; then echo \"\"; fi"
 
 checkUnassignedReferences = checkUnassignedReferences' False
 checkUnassignedReferences' includeGlobals params t = warnings
@@ -2368,8 +2388,11 @@ prop_checkGlobsAsOptions1 = verify checkGlobsAsOptions "rm *.txt"
 prop_checkGlobsAsOptions2 = verify checkGlobsAsOptions "ls ??.*"
 prop_checkGlobsAsOptions3 = verifyNot checkGlobsAsOptions "rm -- *.txt"
 prop_checkGlobsAsOptions4 = verifyNot checkGlobsAsOptions "*.txt"
-checkGlobsAsOptions _ (T_SimpleCommand _ _ args) =
-    mapM_ check $ takeWhile (not . isEndOfArgs) (drop 1 args)
+prop_checkGlobsAsOptions5 = verifyNot checkGlobsAsOptions "echo 'Files:' *.txt"
+prop_checkGlobsAsOptions6 = verifyNot checkGlobsAsOptions "printf '%s\\n' *"
+checkGlobsAsOptions _ cmd@(T_SimpleCommand _ _ args) =
+    unless ((fromMaybe "" $ getCommandBasename cmd) `elem` ["echo", "printf"]) $
+        mapM_ check $ takeWhile (not . isEndOfArgs) (drop 1 args)
   where
     check v@(T_NormalWord _ (T_Glob id s:_)) | s == "*" || s == "?" =
         info id 2035 "Use ./*glob* or -- *glob* so names with dashes won't become options."
@@ -3366,6 +3389,8 @@ prop_checkPipeToNowhere15 = verifyNot checkPipeToNowhere "ls > foo 2> bar |& gre
 prop_checkPipeToNowhere16 = verifyNot checkPipeToNowhere "echo World | cat << EOF\nhello $(cat)\nEOF\n"
 prop_checkPipeToNowhere17 = verify checkPipeToNowhere "echo World | cat << 'EOF'\nhello $(cat)\nEOF\n"
 prop_checkPipeToNowhere18 = verifyNot checkPipeToNowhere "ls 1>&3 3>&1 3>&- | wc -l"
+prop_checkPipeToNowhere19 = verifyNot checkPipeToNowhere "find . -print0 | du --files0-from=/dev/stdin"
+prop_checkPipeToNowhere20 = verifyNot checkPipeToNowhere "find . | du --exclude-from=/dev/fd/0"
 
 data PipeType = StdoutPipe | StdoutStderrPipe | NoPipe deriving (Eq)
 checkPipeToNowhere :: Parameters -> Token -> WriterT [TokenComment] Identity ()
@@ -3385,6 +3410,7 @@ checkPipeToNowhere params t =
             name <- getCommandBasename cmd
             guard $ name `elem` nonReadingCommands
             guard $ not hasConsumers && input /= NoPipe
+            guard . not $ commandSpecificException name cmd
 
             -- Confusing echo for cat is so common that it's worth a special case
             let suggestion =
@@ -3426,6 +3452,11 @@ checkPipeToNowhere params t =
                 inputWarning
                 outputWarning
                 mapM_ warnAboutDupes $ Map.assocs fdMap
+
+    commandSpecificException name cmd =
+        case name of
+            "du" -> any (`elem` ["exclude-from", "files0-from"]) $ lt $ map snd $ getAllFlags cmd
+            _ -> False
 
     warnAboutDupes (n, list@(_:_:_)) =
         forM_ list $ \c -> err (getOpId c) 2261 $
@@ -3885,6 +3916,87 @@ groupByLink f list =
         then g next (current:span) rest
         else (reverse $ current:span) : g next [] rest
     g current span [] = [reverse (current:span)]
+
+
+prop_checkBlatantRecursion1 = verify checkBlatantRecursion ":(){ :|:& };:"
+prop_checkBlatantRecursion2 = verify checkBlatantRecursion "f() { f; }"
+prop_checkBlatantRecursion3 = verifyNot checkBlatantRecursion "f() { command f; }"
+prop_checkBlatantRecursion4 = verify checkBlatantRecursion "cd() { cd \"$lol/$1\" || exit; }"
+prop_checkBlatantRecursion5 = verifyNot checkBlatantRecursion "cd() { [ -z \"$1\" ] || cd \"$1\"; }"
+prop_checkBlatantRecursion6 = verifyNot checkBlatantRecursion "cd() { something; cd $1; }"
+prop_checkBlatantRecursion7 = verifyNot checkBlatantRecursion "cd() { builtin cd $1; }"
+checkBlatantRecursion :: Parameters -> Token -> Writer [TokenComment] ()
+checkBlatantRecursion params t =
+    case t of
+        T_Function _ _ _ name body ->
+            case getCommandSequences body of
+                    [first : _] -> checkList name first
+                    _ -> return ()
+        _ -> return ()
+  where
+    checkList :: String -> Token -> Writer [TokenComment] ()
+    checkList name t =
+        case t of
+            T_Backgrounded _ t -> checkList name t
+            T_AndIf _ lhs _ -> checkList name lhs
+            T_OrIf _ lhs _ -> checkList name lhs
+            T_Pipeline _ _ cmds -> mapM_ (checkCommand name) cmds
+            _ -> return ()
+
+    checkCommand :: String -> Token -> Writer [TokenComment] ()
+    checkCommand name cmd = sequence_ $ do
+        let (invokedM, t) = getCommandNameAndToken True cmd
+        invoked <- invokedM
+        guard $ name == invoked
+        return $
+            errWithFix (getId t) 2264
+                ("This function unconditionally re-invokes itself. Missing 'command'?")
+                (fixWith [replaceStart (getId t) params 0 $ "command "])
+
+
+prop_checkBadTestAndOr1 = verify checkBadTestAndOr "[ x ] & [ y ]"
+prop_checkBadTestAndOr2 = verify checkBadTestAndOr "test -e foo & [ y ]"
+prop_checkBadTestAndOr3 = verify checkBadTestAndOr "[ x ] | [ y ]"
+checkBadTestAndOr params t =
+    case t of
+        T_Pipeline _ seps cmds@(_:_:_) -> checkOrs seps cmds
+        T_Backgrounded id cmd -> checkAnds id cmd
+        _ -> return ()
+  where
+    checkOrs seps cmds =
+        let maybeSeps = map Just seps
+            commandWithSeps = zip3 (Nothing:maybeSeps) cmds (maybeSeps ++ [Nothing])
+        in
+            mapM_ checkTest commandWithSeps
+    checkTest (before, cmd, after) =
+        when (isTest cmd) $ do
+            checkPipe before
+            checkPipe after
+
+    checkPipe t =
+        case t of
+            Just (T_Pipe id "|") ->
+                warnWithFix id 2266 "Use || for logical OR. Single | will pipe." $
+                    fixWith [replaceEnd id params 0 "|"]
+            _ -> return ()
+
+    checkAnds id t =
+        case t of
+            T_AndIf _ _ rhs -> checkAnds id rhs
+            T_OrIf _ _ rhs -> checkAnds id rhs
+            T_Pipeline _ _ list | not (null list) -> checkAnds id (last list)
+            cmd -> when (isTest cmd) $
+                errWithFix id 2265 "Use && for logical AND. Single & will background and return true." $
+                    (fixWith [replaceEnd id params 0 "&"])
+
+    isTest t =
+        case t of
+            T_Condition {} -> True
+            T_SimpleCommand {} -> t `isCommand` "test"
+            T_Redirecting _ _ t -> isTest t
+            T_Annotation _ _ t -> isTest t
+            _ -> False
+
 
 return []
 runTests =  $( [| $(forAllProperties) (quickCheckWithResult (stdArgs { maxSuccess = 1 }) ) |])

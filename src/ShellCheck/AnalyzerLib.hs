@@ -177,6 +177,8 @@ err   id code str = addComment $ makeComment ErrorC id code str
 info  id code str = addComment $ makeComment InfoC id code str
 style id code str = addComment $ makeComment StyleC id code str
 
+errWithFix :: MonadWriter [TokenComment] m => Id -> Code -> String -> Fix -> m ()
+errWithFix  = addCommentWithFix ErrorC
 warnWithFix :: MonadWriter [TokenComment] m => Id -> Code -> String -> Fix -> m ()
 warnWithFix  = addCommentWithFix WarningC
 styleWithFix :: MonadWriter [TokenComment] m => Id -> Code -> String -> Fix -> m ()
@@ -512,7 +514,11 @@ getModifiedVariables t =
             guard . not . null $ str
             return (t, token, str, DataString SourceChecked)
 
-        T_DollarBraced _ _ l -> do
+        TC_Unary _ _ "-n" token -> markAsChecked t token
+        TC_Unary _ _ "-z" token -> markAsChecked t token
+        TC_Nullary _ _ token -> markAsChecked t token
+
+        T_DollarBraced _ _ l -> maybeToList $ do
             let string = concat $ oversimplify l
             let modifier = getBracedModifier string
             guard $ any (`isPrefixOf` modifier) ["=", ":="]
@@ -529,6 +535,14 @@ getModifiedVariables t =
         T_ForIn id str words _ -> [(t, t, str, DataString $ SourceFrom words)]
         T_SelectIn id str words _ -> [(t, t, str, DataString $ SourceFrom words)]
         _ -> []
+  where
+    markAsChecked place token = mapMaybe (f place) $ getWordParts token
+    f place t = case t of
+            T_DollarBraced _ _ l ->
+                let str = getBracedReference $ concat $ oversimplify l in do
+                    guard $ isVariableName str
+                    return (place, t, str, DataString SourceChecked)
+            _ -> Nothing
 
 isClosingFileOp op =
     case op of
@@ -671,13 +685,30 @@ getModifiedVariableCommand base@(T_SimpleCommand id cmdPrefix (T_NormalWord _ (T
         f [] = fail "not found"
 
     -- mapfile has some curious syntax allowing flags plus 0..n variable names
-    -- where only the first non-option one is used if any. Here we cheat and
-    -- just get the last one, if it's a variable name.
-    getMapfileArray base arguments = do
-        lastArg <- listToMaybe (reverse arguments)
-        name <- getLiteralString lastArg
-        guard $ isVariableName name
-        return (base, lastArg, name, DataArray SourceExternal)
+    -- where only the first non-option one is used if any.
+    getMapfileArray base rest = parseArgs `mplus` fallback
+      where
+        parseArgs :: Maybe (Token, Token, String, DataType)
+        parseArgs = do
+            args <- getGnuOpts "d:n:O:s:u:C:c:t" base
+            let names = map snd $ filter (\(x,y) -> null x) args
+            if null names
+                then
+                    return (base, base, "MAPFILE", DataArray SourceExternal)
+                else do
+                    first <- listToMaybe names
+                    name <- getLiteralString first
+                    guard $ isVariableName name
+                    return (base, first, name, DataArray SourceExternal)
+        -- If arg parsing fails (due to bad or new flags), get the last variable name
+        fallback :: Maybe (Token, Token, String, DataType)
+        fallback = do
+            (name, token) <- listToMaybe . mapMaybe f $ reverse rest
+            return (base, token, name, DataArray SourceExternal)
+        f arg = do
+            name <- getLiteralString arg
+            guard $ isVariableName name
+            return (name, arg)
 
     -- get all the array variables used in read, e.g. read -a arr
     getReadArrayVariables args =
@@ -915,33 +946,6 @@ isQuotedAlternativeReference t =
         _ -> False
   where
     re = mkRegex "(^|\\]):?\\+"
-
--- getGnuOpts "erd:u:" will parse a SimpleCommand like
---     read -re -d : -u 3 bar
--- into
---     Just [("r", -re), ("e", -re), ("d", :), ("u", 3), ("", bar)]
--- where flags with arguments map to arguments, while others map to themselves.
--- Any unrecognized flag will result in Nothing.
-getGnuOpts str t = getOpts str $ getAllFlags t
-getBsdOpts str t = getOpts str $ getLeadingFlags t
-getOpts :: String -> [(Token, String)] -> Maybe [(String, Token)]
-getOpts string flags = process flags
-  where
-    flagList (c:':':rest) = ([c], True) : flagList rest
-    flagList (c:rest)     = ([c], False) : flagList rest
-    flagList []           = []
-    flagMap = Map.fromList $ ("", False) : flagList string
-
-    process [] = return []
-    process ((token1, flag):rest1) = do
-        takesArg <- Map.lookup flag flagMap
-        (token, rest) <- if takesArg
-            then case rest1 of
-                (token2, ""):rest2 -> return (token2, rest2)
-                _ -> fail "takesArg without valid arg"
-            else return (token1, rest1)
-        more <- process rest
-        return $ (flag, token) : more
 
 supportsArrays Bash = True
 supportsArrays Ksh = True
