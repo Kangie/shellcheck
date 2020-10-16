@@ -1,5 +1,6 @@
 module ShellCheck.Data where
 
+import qualified Data.Map
 import ShellCheck.Interface
 import ShellCheck.PortageAutoInternalVariables
 import Data.Version (showVersion)
@@ -118,7 +119,15 @@ portageManualInternalVariables = [
     "RESTRICT_PYTHON_ABIS", "PYTHON_MODNAME"
   ]
 
-portageInternalVariables = portageManualInternalVariables ++ concat(map snd portageAutoInternalVariables)
+eclassVarsFromMap :: String -> [String]
+eclassVarsFromMap eclass =
+    Data.Map.findWithDefault []
+                             eclass
+                             portageAutoInternalVariables
+
+portageInternalVariables inheritedEclasses =
+    portageManualInternalVariables ++ concatMap eclassVarsFromMap
+                                                inheritedEclasses
 
 specialVariablesWithoutSpaces = [
     "$", "-", "?", "!", "#"

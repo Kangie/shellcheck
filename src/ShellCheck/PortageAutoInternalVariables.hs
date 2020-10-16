@@ -7,7 +7,10 @@ module ShellCheck.PortageAutoInternalVariables (
 
 -- Last Generated: 10/13/20
 
+import qualified Data.Map
+
 portageAutoInternalVariables =
+    Data.Map.fromList
     [
     ("alternatives", ["ALTERNATIVES", "SOURCE"]),
 

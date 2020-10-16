@@ -265,7 +265,7 @@ verifyNotTree f s = producesComments f s == Just False
 -- Takes a regular checker function and a Parameters and returns a new
 -- checker function that acts as though portage mode had been passed
 -- in the parameters.
-withPortageParams :: (Parameters -> Token -> Writer [TokenComment] ()) -> Parameters -> (Token -> Writer [TokenComment] ())
+withPortageParams :: (Parameters -> a) -> Parameters -> a
 withPortageParams f p = f $ p { portageFileType = Ebuild False }
 
 checkCommand str f t@(T_SimpleCommand id _ (cmd:rest))
@@ -2183,7 +2183,9 @@ checkFunctionsUsedExternally params t =
 allInternalVariables params =
     genericInternalVariables ++
     if shellType params == Ksh then kshInternalVariables else [] ++
-    if isPortageBuild params then portageInternalVariables else []
+    if isPortageBuild params
+    then portageInternalVariables (getInheritedEclasses (rootNode params))
+    else []
 
 prop_checkUnused0 = verifyNotTree checkUnusedAssignments "var=foo; echo $var"
 prop_checkUnused1 = verifyTree checkUnusedAssignments "var=foo; echo $bar"
@@ -2233,6 +2235,24 @@ prop_checkUnused44= verifyNotTree checkUnusedAssignments "DEFINE_string \"foo$ib
 prop_checkUnused45= verifyTree checkUnusedAssignments "readonly foo=bar"
 prop_checkUnused46= verifyTree checkUnusedAssignments "readonly foo=(bar)"
 prop_checkUnused47= verifyNotTree checkUnusedAssignments "a=1; alias hello='echo $a'"
+prop_checkUnused_portageVarAssign=
+    verifyNotTree (withPortageParams checkUnusedAssignments)
+                  "BROOT=2"
+prop_checkUnused_portageVarAssignNoPortageParams=
+    verifyTree checkUnusedAssignments
+               "BROOT=2"
+prop_checkUnused_portageInheritedVarAssign=
+    verifyNotTree (withPortageParams checkUnusedAssignments)
+               "inherit cargo; CARGO_INSTALL_PATH=2"
+prop_checkUnused_portageInheritedVarAssignNoPortage=
+    verifyTree checkUnusedAssignments
+               "inherit cargo; CARGO_INSTALL_PATH=2"
+prop_checkUnused_portageInheritedVarAssignNoInherit=
+    verifyTree (withPortageParams checkUnusedAssignments)
+               "CARGO_INSTALL_PATH=2"
+prop_checkUnused_portageInheritedVarAssignNoInheritOrPortage=
+    verifyTree checkUnusedAssignments
+               "CARGO_INSTALL_PATH=2"
 checkUnusedAssignments params t = execWriter (mapM_ warnFor unused)
   where
     flow = variableFlow params
@@ -2305,6 +2325,24 @@ prop_checkUnassignedReferences_minusNBraced  = verifyNotTree checkUnassignedRefe
 prop_checkUnassignedReferences_minusZBraced  = verifyNotTree checkUnassignedReferences "if [ -z \"${x}\" ]; then echo \"\"; fi"
 prop_checkUnassignedReferences_minusNDefault = verifyNotTree checkUnassignedReferences "if [ -n \"${x:-}\" ]; then echo $x; fi"
 prop_checkUnassignedReferences_minusZDefault = verifyNotTree checkUnassignedReferences "if [ -z \"${x:-}\" ]; then echo \"\"; fi"
+prop_checkUnassignedReference_portageVarReference =
+    verifyNotTree (withPortageParams (checkUnassignedReferences' True))
+                  "echo $BROOT"
+prop_checkUnassignedReference_portageVarReferenceNoPortage =
+    verifyTree (checkUnassignedReferences' True)
+               "echo $BROOT"
+prop_checkUnassignedReference_portageInheritedVarReference =
+    verifyNotTree (withPortageParams (checkUnassignedReferences' True))
+                  "inherit cargo; echo $CARGO_INSTALL_PATH"
+prop_checkUnassignedReference_portageInheritedVarReferenceNoPortage =
+    verifyTree (checkUnassignedReferences' True)
+               "inherit cargo; echo $CARGO_INSTALL_PATH"
+prop_checkUnassignedReference_portageInheritedVarReferenceNoInherit =
+    verifyTree (withPortageParams (checkUnassignedReferences' True))
+               "echo $CARGO_INSTALL_PATH"
+prop_checkUnassignedReference_portageInheritedVarReferenceNoInheritOrPortage =
+    verifyTree (checkUnassignedReferences' True)
+               "echo $CARGO_INSTALL_PATH"
 
 checkUnassignedReferences = checkUnassignedReferences' False
 checkUnassignedReferences' includeGlobals params t = warnings
