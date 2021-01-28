@@ -688,6 +688,10 @@ checkFindExec _ cmd@(T_SimpleCommand _ _ t@(h:r)) | cmd `isCommand` "find" = do
 checkFindExec _ _ = return ()
 
 
+commandNeverProducesSpaces params t =
+    isPortageBuild params && maybe False (`elem` ["usev", "use_with", "use_enable"]) (getCommandNameFromExpansion t)
+
+
 prop_checkUnquotedExpansions1 = verify checkUnquotedExpansions "rm $(ls)"
 prop_checkUnquotedExpansions1a= verify checkUnquotedExpansions "rm `ls`"
 prop_checkUnquotedExpansions2 = verify checkUnquotedExpansions "rm foo$(date)"
@@ -710,13 +714,11 @@ checkUnquotedExpansions params =
     check _ = return ()
     tree = parentMap params
     examine t contents =
-        unless (null contents || shouldBeSplit t || isQuoteFree tree t || usedAsCommandName tree t || commandNeverProducesSpaces t) $
+        unless (null contents || shouldBeSplit t || isQuoteFree tree t || usedAsCommandName tree t || commandNeverProducesSpaces params t) $
             warn (getId t) 2046 "Quote this to prevent word splitting."
 
     shouldBeSplit t =
         getCommandNameFromExpansion t == Just "seq"
-    commandNeverProducesSpaces t =
-        isPortageBuild params && getCommandNameFromExpansion t == Just "usev"
 
 
 prop_checkRedirectToSame = verify checkRedirectToSame "cat foo > foo"
@@ -3341,6 +3343,10 @@ prop_checkSplittingInArrays5 = verifyNot checkSplittingInArrays "a=( $! $$ $# )"
 prop_checkSplittingInArrays6 = verifyNot checkSplittingInArrays "a=( ${#arr[@]} )"
 prop_checkSplittingInArrays7 = verifyNot checkSplittingInArrays "a=( foo{1,2} )"
 prop_checkSplittingInArrays8 = verifyNot checkSplittingInArrays "a=( * )"
+prop_checkSplittingInArraysUseWith1 = verify checkSplittingInArrays "a=( $(use_with b) )"
+prop_checkSplittingInArraysUseWith2 = verifyNot (withPortageParams checkSplittingInArrays) "a=( $(use_with b) )"
+prop_checkSplittingInArraysUseEnable1 = verify checkSplittingInArrays "a=( `use_enable b` )"
+prop_checkSplittingInArraysUseEnable2 = verifyNot (withPortageParams checkSplittingInArrays) "a=( `use_enable b` )"
 checkSplittingInArrays params t =
     case t of
         T_Array _ elements -> mapM_ check elements
@@ -3350,9 +3356,9 @@ checkSplittingInArrays params t =
         T_NormalWord _ parts -> mapM_ checkPart parts
         _ -> return ()
     checkPart part = case part of
-        T_DollarExpansion id _ -> forCommand id
-        T_DollarBraceCommandExpansion id _ -> forCommand id
-        T_Backticked id _ -> forCommand id
+        T_DollarExpansion id str -> forCommand id part
+        T_DollarBraceCommandExpansion id str -> forCommand id part
+        T_Backticked id _ -> forCommand id part
         T_DollarBraced id _ str |
             not (isCountingReference part)
             && not (isQuotedAlternativeReference part)
@@ -3364,7 +3370,8 @@ checkSplittingInArrays params t =
         _ -> return ()
     variablesWithoutSpaces = allVariablesWithoutSpaces params
 
-    forCommand id =
+    forCommand id t =
+        unless (commandNeverProducesSpaces params t) $
         warn id 2207 $
             if shellType params == Ksh
             then "Prefer read -A or while read to split command output (or quote to avoid splitting)."
