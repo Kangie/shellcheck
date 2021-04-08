@@ -1,21 +1,28 @@
 ## Git
 ### Added
 - `disable` directives can now be a range, e.g. `disable=SC3000-SC4000`
+- SC1143: Warn about line continuations in comments
 - SC2259/SC2260: Warn when redirections override pipes
 - SC2261: Warn about multiple competing redirections
 - SC2262/SC2263: Warn about aliases declared and used in the same parsing unit
 - SC2264: Warn about wrapper functions that blatantly recurse
 - SC2265/SC2266: Warn when using & or | with test statements
+- SC2267: Warn when using xargs -i instead of -I
+- Optional avoid-x-comparisons: Style warning SC2268 for `[ x$var = xval ]`
 
 ### Fixed
 - SC1072/SC1073 now respond to disable annotations, though ignoring parse errors
   is still purely cosmetic and does not allow ShellCheck to continue.
+- Improved error reporting for trailing tokens after ]/]] and compound commands
+- `#!/usr/bin/env -S shell` is now handled correctly
+- Here docs with \r are now parsed correctly and give better warnings
 
 ### Changed
 - Assignments are now parsed to spec, without leniency for leading $ or spaces
 - POSIX/dash unsupported feature warnings now have individual SC3xxx codes
 - SC1090: A leading `$x/` or `$(x)/` is now treated as `./` when locating files
 - SC2154: Variables appearing in -z/-n tests are no longer considered unassigned
+- SC2270-SC2285: Improved warnings about misused =, e.g. `${var}=42`
 
 
 ## v0.7.1 - 2020-04-04
@@ -159,7 +166,7 @@
 - SC2204/SC2205: Warn about `( -z foo )` and `( foo -eq bar )`
 - SC2200/SC2201: Warn about brace expansion in [/[[
 - SC2198/SC2199: Warn about arrays in [/[[
-- SC2196/SC2197: Warn about deprected egrep/fgrep
+- SC2196/SC2197: Warn about deprecated egrep/fgrep
 - SC2195: Warn about unmatchable case branches
 - SC2194: Warn about constant 'case' statements
 - SC2193: Warn about `[[ file.png == *.mp3 ]]` and other unmatchables
@@ -176,7 +183,7 @@
 ### Fixed
 - `-c` no longer suggested when using `grep -o | wc`
 - Comments and whitespace are now allowed before filewide directives
-- Here doc delimters with esoteric quoting like `foo""` are now handled
+- Here doc delimiters with esoteric quoting like `foo""` are now handled
 - SC2095 about `ssh` in while read loops is now suppressed when using `-n`
 - `%(%Y%M%D)T` now recognized as a single formatter in `printf` checks
 - `grep -F` now suppresses regex related suggestions

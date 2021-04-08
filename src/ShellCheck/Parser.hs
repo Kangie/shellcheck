@@ -24,7 +24,7 @@
 module ShellCheck.Parser (parseScript, runTests) where
 
 import ShellCheck.AST
-import ShellCheck.ASTLib
+import ShellCheck.ASTLib hiding (runTests)
 import ShellCheck.Data
 import ShellCheck.Interface
 
@@ -87,11 +87,23 @@ extglobStart = oneOf extglobStartChars
 unicodeDoubleQuotes = "\x201C\x201D\x2033\x2036"
 unicodeSingleQuotes = "\x2018\x2019"
 
-prop_spacing = isOk spacing "  \\\n # Comment"
+prop_spacing1 = isOk spacing "  \\\n # Comment"
+prop_spacing2 = isOk spacing "# We can continue lines with \\"
+prop_spacing3 = isWarning spacing "   \\\n #  --verbose=true \\"
 spacing = do
-    x <- many (many1 linewhitespace <|> try (string "\\\n" >> return ""))
+    x <- many (many1 linewhitespace <|> continuation)
     optional readComment
     return $ concat x
+  where
+    continuation = do
+        try (string "\\\n")
+        -- The line was continued. Warn if this next line is a comment with a trailing \
+        whitespace <- many linewhitespace
+        optional $ do
+            x <- readComment
+            when ("\\" `isSuffixOf` x) $
+                parseProblem ErrorC 1143 "This backslash is part of a comment and does not continue the line."
+        return whitespace
 
 spacing1 = do
     spacing <- spacing
@@ -123,8 +135,10 @@ readUnicodeQuote = do
     return $ T_Literal id [c]
 
 carriageReturn = do
-    parseNote ErrorC 1017 "Literal carriage return. Run script through tr -d '\\r' ."
+    pos <- getPosition
     char '\r'
+    parseProblemAt pos ErrorC 1017 "Literal carriage return. Run script through tr -d '\\r' ."
+    return '\r'
 
 almostSpace =
     choice [
@@ -209,8 +223,7 @@ startSpan = IncompleteInterval <$> getPosition
 
 endSpan (IncompleteInterval start) = do
     endPos <- getPosition
-    id <- getNextIdBetween start endPos
-    return id
+    getNextIdBetween start endPos
 
 getSpanPositionsFor m = do
     start <- getPosition
@@ -391,6 +404,8 @@ unexpecting s p = try $
     (try p >> fail ("Unexpected " ++ s)) <|> return ()
 
 notFollowedBy2 = unexpecting ""
+
+isFollowedBy p = (lookAhead . try $ p $> True) <|> return False
 
 reluctantlyTill p end =
     (lookAhead (void (try end) <|> eof) >> return []) <|> do
@@ -923,8 +938,9 @@ prop_readCondition20 = isOk readCondition "[[ echo_rc -eq 0 ]]"
 prop_readCondition21 = isOk readCondition "[[ $1 =~ ^(a\\ b)$ ]]"
 prop_readCondition22 = isOk readCondition "[[ $1 =~ \\.a\\.(\\.b\\.)\\.c\\. ]]"
 prop_readCondition23 = isOk readCondition "[[ -v arr[$var] ]]"
-prop_readCondition24 = isWarning readCondition "[[ 1 == 2 ]]]"
 prop_readCondition25 = isOk readCondition "[[ lex.yy.c -ot program.l ]]"
+prop_readCondition26 = isOk readScript "[[ foo ]]\\\n && bar"
+prop_readCondition27 = not $ isOk readConditionCommand "[[ x ]] foo"
 readCondition = called "test expression" $ do
     opos <- getPosition
     start <- startSpan
@@ -953,13 +969,7 @@ readCondition = called "test expression" $ do
     id <- endSpan start
     when (open == "[[" && close /= "]]") $ parseProblemAt cpos ErrorC 1033 "Test expression was opened with double [[ but closed with single ]. Make sure they match."
     when (open == "[" && close /= "]" ) $ parseProblemAt opos ErrorC 1034 "Test expression was opened with single [ but closed with double ]]. Make sure they match."
-    optional $ lookAhead $ do
-        pos <- getPosition
-        notFollowedBy2 readCmdWord <|>
-            parseProblemAt pos ErrorC 1136
-                ("Unexpected characters after terminating " ++ close ++ ". Missing semicolon/linefeed?")
     spacing
-    many readCmdWord -- Read and throw away remainders to get then/do warnings. Fixme?
     return $ T_Condition id typ condition
 
 readAnnotationPrefix = do
@@ -1041,6 +1051,7 @@ readComment = do
     unexpecting "shellcheck annotation" readAnnotationPrefix
     readAnyComment
 
+prop_readAnyComment = isOk readAnyComment "# Comment"
 readAnyComment = do
     char '#'
     many $ noneOf "\r\n"
@@ -1406,6 +1417,8 @@ readNormalEscaped = called "escaped char" $ do
     do
         next <- quotable <|> oneOf "?*@!+[]{}.,~#"
         when (next == ' ') $ checkTrailingSpaces pos <|> return ()
+        -- Check if this line is followed by a commented line with a trailing backslash
+        when (next == '\n') $ try . lookAhead $ void spacing
         return $ if next == '\n' then "" else [next]
       <|>
         do
@@ -1617,6 +1630,7 @@ readArithmeticExpression = called "((..)) command" $ do
     c <- readArithmeticContents
     string "))"
     id <- endSpan start
+    spacing
     return (T_Arithmetic id c)
 
 -- If the next characters match prefix, try two different parsers and warn if the alternate parser had to be used
@@ -1763,6 +1777,8 @@ prop_readHereDoc17= isWarning readScript "cat <<- ' foo'\nbar\n  foo\n foo\n"
 prop_readHereDoc18= isOk readScript "cat <<'\"foo'\nbar\n\"foo\n"
 prop_readHereDoc20= isWarning readScript "cat << foo\n  foo\n()\nfoo\n"
 prop_readHereDoc21= isOk readScript "# shellcheck disable=SC1039\ncat << foo\n  foo\n()\nfoo\n"
+prop_readHereDoc22 = isWarning readScript "cat << foo\r\ncow\r\nfoo\r\n"
+prop_readHereDoc23 = isNotOk readScript "cat << foo \r\ncow\r\nfoo\r\n"
 readHereDoc = called "here document" $ do
     pos <- getPosition
     try $ string "<<"
@@ -1791,7 +1807,9 @@ readHereDoc = called "here document" $ do
     -- Fun fact: bash considers << foo"" quoted, but not << <("foo").
     readToken = do
         str <- readStringForParser readNormalWord
-        return $ unquote str
+        -- A here doc actually works with \r\n because the \r becomes part of the token
+        crstr <- (carriageReturn >> (return $ str ++ "\r")) <|> return str
+        return $ unquote crstr
 
 readPendingHereDocs = do
     docs <- popPendingHereDocs
@@ -1906,14 +1924,14 @@ readPendingHereDocs = do
     debugHereDoc tokenId endToken doc
         | endToken `isInfixOf` doc =
             let lookAt line = when (endToken `isInfixOf` line) $
-                      parseProblemAtId tokenId ErrorC 1042 ("Close matches include '" ++ line ++ "' (!= '" ++ endToken ++ "').")
+                      parseProblemAtId tokenId ErrorC 1042 ("Close matches include '" ++ (e4m line) ++ "' (!= '" ++ (e4m endToken) ++ "').")
             in do
-                  parseProblemAtId tokenId ErrorC 1041 ("Found '" ++ endToken ++ "' further down, but not on a separate line.")
+                  parseProblemAtId tokenId ErrorC 1041 ("Found '" ++ (e4m endToken) ++ "' further down, but not on a separate line.")
                   mapM_ lookAt (lines doc)
         | map toLower endToken `isInfixOf` map toLower doc =
-            parseProblemAtId tokenId ErrorC 1043 ("Found " ++ endToken ++ " further down, but with wrong casing.")
+            parseProblemAtId tokenId ErrorC 1043 ("Found " ++ (e4m endToken) ++ " further down, but with wrong casing.")
         | otherwise =
-            parseProblemAtId tokenId ErrorC 1044 ("Couldn't find end token `" ++ endToken ++ "' in the here document.")
+            parseProblemAtId tokenId ErrorC 1044 ("Couldn't find end token `" ++ (e4m endToken) ++ "' in the here document.")
 
 
 readFilename = readNormalWord
@@ -1968,8 +1986,6 @@ readIoRedirect = do
     skipAnnotationAndWarn
     spacing
     return $ T_FdRedirect id n redir
-
-readRedirectList = many1 readIoRedirect
 
 prop_readHereString = isOk readHereString "<<< \"Hello $world\""
 readHereString = called "here string" $ do
@@ -2092,10 +2108,6 @@ readSimpleCommand = called "simple command" $ do
         if isCommand list cmd
         then action
         else getParser def cmd rest
-
-    cStyleComment cmd =
-        case cmd of
-            _ -> False
 
     validateCommand cmd =
         case cmd of
@@ -2300,6 +2312,7 @@ readPipe = do
 
 readCommand = choice [
     readCompoundCommand,
+    readConditionCommand,
     readCoProc,
     readSimpleCommand
     ]
@@ -2412,6 +2425,7 @@ readSubshell = called "explicit subshell" $ do
     allspacing
     char ')' <|> fail "Expected ) closing the subshell"
     id <- endSpan start
+    spacing
     return $ T_Subshell id list
 
 prop_readBraceGroup = isOk readBraceGroup "{ a; b | c | d; e; }"
@@ -2432,6 +2446,7 @@ readBraceGroup = called "brace group" $ do
         parseProblem ErrorC 1056 "Expected a '}'. If you have one, try a ; or \\n in front of it."
         fail "Missing '}'"
     id <- endSpan start
+    spacing
     return $ T_BraceGroup id list
 
 prop_readBatsTest = isOk readBatsTest "@test 'can parse' {\n  true\n}"
@@ -2484,6 +2499,11 @@ readDoGroup kwId = do
             parseProblemAtId (getId doKw) ErrorC 1061 "Couldn't find 'done' for this 'do'."
             parseProblem ErrorC 1062 "Expected 'done' matching previously mentioned 'do'."
             return "Expected 'done'"
+
+    optional . lookAhead $ do
+        pos <- getPosition
+        try $ string "<("
+        parseProblemAt pos ErrorC 1142 "Use 'done < <(cmd)' to redirect from process substitution (currently missing one '<')."
     return commands
 
 
@@ -2701,8 +2721,37 @@ readCoProc = called "coproc" $ do
         id <- endSpan start
         return $ T_CoProcBody id body
 
-
 readPattern = (readPatternWord `thenSkip` spacing) `sepBy1` (char '|' `thenSkip` spacing)
+
+prop_readConditionCommand = isOk readConditionCommand "[[ x ]] > foo 2>&1"
+readConditionCommand = do
+    cmd <- readCondition
+    redirs <- many readIoRedirect
+    id <- getNextIdSpanningTokenList (cmd:redirs)
+
+    pos <- getPosition
+    hasDashAo <- isFollowedBy $ do
+        c <- choice $ try . string <$> ["-o", "-a", "or", "and"]
+        posEnd <- getPosition
+        parseProblemAtWithEnd pos posEnd ErrorC 1139 $
+            "Use " ++ alt c ++ " instead of '" ++ c ++ "' between test commands."
+
+    -- If the next word is a keyword, readNormalWord will trigger a warning
+    hasKeyword <- isFollowedBy readKeyword
+    hasWord <- isFollowedBy readNormalWord
+
+    when (hasWord && not (hasKeyword || hasDashAo)) $ do
+        -- We have other words following, and no error has been emitted.
+        posEnd <- getPosition
+        parseProblemAtWithEnd pos posEnd ErrorC 1140 "Unexpected parameters after condition. Missing &&/||, or bad expression?"
+
+    return $ T_Redirecting id redirs cmd
+  where
+    alt "or" = "||"
+    alt "-o" = "||"
+    alt "and" = "&&"
+    alt "-a" = "&&"
+    alt _ = "|| or &&"
 
 prop_readCompoundCommand = isOk readCompoundCommand "{ echo foo; }>/dev/null"
 readCompoundCommand = do
@@ -2711,7 +2760,6 @@ readCompoundCommand = do
         readAmbiguous "((" readArithmeticExpression readSubshell (\pos ->
             parseNoteAt pos ErrorC 1105 "Shells disambiguate (( differently or not at all. For subshell, add spaces around ( . For ((, fix parsing errors."),
         readSubshell,
-        readCondition,
         readWhileClause,
         readUntilClause,
         readIfClause,
@@ -2721,15 +2769,15 @@ readCompoundCommand = do
         readBatsTest,
         readFunctionDefinition
         ]
-    spacing
     redirs <- many readIoRedirect
     id <- getNextIdSpanningTokenList (cmd:redirs)
-    unless (null redirs) $ optional $ do
-        lookAhead $ try (spacing >> needsSeparator)
-        parseProblem WarningC 1013 "Bash requires ; or \\n here, after redirecting nested compound commands."
+    optional . lookAhead $ do
+        notFollowedBy2 $ choice [readKeyword, g_Lbrace]
+        pos <- getPosition
+        many1 readNormalWord
+        posEnd <- getPosition
+        parseProblemAtWithEnd pos posEnd ErrorC 1141 "Unexpected tokens after compound command. Bad redirection or missing ;/&&/||/|?"
     return $ T_Redirecting id redirs cmd
-  where
-    needsSeparator = choice [ g_Then, g_Else, g_Elif, g_Fi, g_Do, g_Done, g_Esac, g_Rbrace ]
 
 
 readCompoundList = readTerm
@@ -2818,15 +2866,13 @@ readAssignmentWordExt lenient = called "variable assignment" $ do
     (id, variable, op, indices) <- try $ do
         start <- startSpan
         pos <- getPosition
+        -- Check for a leading $ at parse time, to warn for $foo=(bar) which
+        -- would otherwise cause a parse failure so it can't be checked later.
         leadingDollarPos <-
             if lenient
             then optionMaybe $ getSpanPositionsFor (char '$')
             else return Nothing
         variable <- readVariableName
-        middleDollarPos <-
-            if lenient
-            then optionMaybe $ getSpanPositionsFor readNormalDollar
-            else return Nothing
         indices <- many readArrayIndex
         hasLeftSpace <- fmap (not . null) spacing
         opStart <- getPosition
@@ -2834,20 +2880,12 @@ readAssignmentWordExt lenient = called "variable assignment" $ do
         op <- readAssignmentOp
         opEnd <- getPosition
 
-        when (isJust leadingDollarPos || isJust middleDollarPos || hasLeftSpace) $ do
-            sequence_ $ do
-                (l, r) <- leadingDollarPos
-                return $ parseProblemAtWithEnd l r ErrorC 1066 "Don't use $ on the left side of assignments."
-            sequence_ $ do
-                (l, r) <- middleDollarPos
-                return $ parseProblemAtWithEnd l r ErrorC 1067 "For indirection, use arrays, declare \"var$n=value\", or (for sh) read/eval."
-            when hasLeftSpace $ do
-                parseProblemAtWithEnd opStart opEnd ErrorC 1068 $
-                    "Don't put spaces around the "
-                    ++ (if op == Append
-                        then "+= when appending"
-                        else "= in assignments")
-                    ++ " (or quote to make it literal)."
+        when (isJust leadingDollarPos || hasLeftSpace) $ do
+            hasParen <- isFollowedBy (spacing >> char '(')
+            when hasParen $
+                sequence_ $ do
+                    (l, r) <- leadingDollarPos
+                    return $ parseProblemAtWithEnd l r ErrorC 1066 "Don't use $ on the left side of assignments."
 
             -- Fail so that this is not parsed as an assignment.
             fail ""
@@ -3146,7 +3184,7 @@ readConfigFile filename = do
         let line = "line " ++ (show . sourceLine $ errorPos err)
             suggestion = getStringFromParsec $ errorMessages err
         in
-            "Failed to process " ++ filename ++ ", " ++ line ++ ": "
+            "Failed to process " ++ (e4m filename) ++ ", " ++ line ++ ": "
                 ++ suggestion
 
 prop_readConfigKVs1 = isOk readConfigKVs "disable=1234"
@@ -3167,6 +3205,7 @@ prop_readScript2 = isWarning readScript "#!/bin/bash\r\necho hello world\n"
 prop_readScript3 = isWarning readScript "#!/bin/bash\necho hello\xA0world"
 prop_readScript4 = isWarning readScript "#!/usr/bin/perl\nfoo=("
 prop_readScript5 = isOk readScript "#!/bin/bash\n#This is an empty script\n\n"
+prop_readScript6 = isOk readScript "#!/usr/bin/env -S X=FOO bash\n#This is an empty script\n\n"
 readScriptFile sourced = do
     start <- startSpan
     pos <- getPosition
@@ -3192,8 +3231,8 @@ readScriptFile sourced = do
     let ignoreShebang = shellAnnotationSpecified || shellFlagSpecified
 
     unless ignoreShebang $
-        verifyShebang pos (getShell shebangString)
-    if ignoreShebang || isValidShell (getShell shebangString) /= Just False
+        verifyShebang pos (executableFromShebang shebangString)
+    if ignoreShebang || isValidShell (executableFromShebang shebangString) /= Just False
       then do
             commands <- withAnnotations annotations readCompoundListOrEmpty
             id <- endSpan start
@@ -3207,16 +3246,6 @@ readScriptFile sourced = do
             return $ T_Script id shebang []
 
   where
-    basename s = reverse . takeWhile (/= '/') . reverse $ s
-    getShell sb =
-        case words sb of
-            [] -> ""
-            [x] -> basename x
-            (first:second:_) ->
-                if basename first == "env"
-                    then second
-                    else basename first
-
     verifyShebang pos s = do
         case isValidShell s of
             Just True -> return ()

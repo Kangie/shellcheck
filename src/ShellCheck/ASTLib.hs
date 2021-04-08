@@ -17,9 +17,11 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 -}
+{-# LANGUAGE TemplateHaskell #-}
 module ShellCheck.ASTLib where
 
 import ShellCheck.AST
+import ShellCheck.Regex
 
 import Control.Monad.Writer
 import Control.Monad
@@ -29,6 +31,9 @@ import Data.Functor.Identity
 import Data.List
 import Data.Maybe
 import qualified Data.Map as Map
+import Numeric (showHex)
+
+import Test.QuickCheck
 
 -- Is this a type of loop?
 isLoop t = case t of
@@ -135,32 +140,91 @@ isUnquotedFlag token = fromMaybe False $ do
     str <- getLeadingUnquotedString token
     return $ "-" `isPrefixOf` str
 
--- getGnuOpts "erd:u:" will parse a SimpleCommand like
---     read -re -d : -u 3 bar
+-- getGnuOpts "erd:u:" will parse a list of arguments tokens like `read`
+--     -re -d : -u 3 bar
 -- into
---     Just [("r", -re), ("e", -re), ("d", :), ("u", 3), ("", bar)]
--- where flags with arguments map to arguments, while others map to themselves.
--- Any unrecognized flag will result in Nothing.
-getGnuOpts str t = getOpts str $ getAllFlags t
-getBsdOpts str t = getOpts str $ getLeadingFlags t
-getOpts :: String -> [(Token, String)] -> Maybe [(String, Token)]
-getOpts string flags = process flags
+--     Just [("r", (-re, -re)), ("e", (-re, -re)), ("d", (-d,:)), ("u", (-u,3)), ("", (bar,bar))]
+--
+-- Each string flag maps to a tuple of (flag, argument), where argument=flag if it
+-- doesn't take a specific one.
+--
+-- Any unrecognized flag will result in Nothing. The exception is if arbitraryLongOpts
+-- is set, in which case --anything will map to "anything".
+getGnuOpts :: String -> [Token] -> Maybe [(String, (Token, Token))]
+getGnuOpts str args = getOpts (True, False) str [] args
+
+-- As above, except the first non-arg string will treat the rest as arguments
+getBsdOpts :: String -> [Token] -> Maybe [(String, (Token, Token))]
+getBsdOpts str args = getOpts (False, False) str [] args
+
+-- Tests for this are in Commands.hs where it's more frequently used
+getOpts ::
+    -- Behavioral config: gnu style, allow arbitrary long options
+    (Bool, Bool)
+    -- A getopts style string
+    -> String
+    -- List of long options and whether they take arguments
+    -> [(String, Bool)]
+    -- List of arguments (excluding command)
+    -> [Token]
+    -- List of flags to tuple of (optionToken, valueToken)
+    -> Maybe [(String, (Token, Token))]
+
+getOpts (gnu, arbitraryLongOpts) string longopts args = process args
   where
     flagList (c:':':rest) = ([c], True) : flagList rest
     flagList (c:rest)     = ([c], False) : flagList rest
-    flagList []           = []
+    flagList []           = longopts
     flagMap = Map.fromList $ ("", False) : flagList string
 
     process [] = return []
-    process ((token1, flag):rest1) = do
-        takesArg <- Map.lookup flag flagMap
-        (token, rest) <- if takesArg
-            then case rest1 of
-                (token2, ""):rest2 -> return (token2, rest2)
-                _ -> fail "takesArg without valid arg"
-            else return (token1, rest1)
-        more <- process rest
-        return $ (flag, token) : more
+    process (token:rest) = do
+        case getLiteralStringDef "\0" token of
+            "--" -> return $ listToArgs rest
+            '-':'-':word -> do
+                let (name, arg) = span (/= '=') word
+                needsArg <-
+                    if arbitraryLongOpts
+                    then return $ Map.findWithDefault False name flagMap
+                    else Map.lookup name flagMap
+
+                if needsArg && null arg
+                  then
+                    case rest of
+                        (arg:rest2) -> do
+                            more <- process rest2
+                            return $ (name, (token, arg)) : more
+                        _ -> fail "Missing arg"
+                  else do
+                    more <- process rest
+                    -- Consider splitting up token to get arg
+                    return $ (name, (token, token)) : more
+            '-':opts -> shortToOpts opts token rest
+            arg ->
+                if gnu
+                then do
+                    more <- process rest
+                    return $ ("", (token, token)):more
+                else return $ listToArgs (token:rest)
+
+    shortToOpts opts token args =
+        case opts of
+            c:rest -> do
+                needsArg <- Map.lookup [c] flagMap
+                case () of
+                    _ | needsArg && null rest -> do
+                        (next:restArgs) <- return args
+                        more <- process restArgs
+                        return $ ([c], (token, next)):more
+                    _ | needsArg -> do
+                        more <- process args
+                        return $ ([c], (token, token)):more
+                    _ -> do
+                        more <- shortToOpts rest token args
+                        return $ ([c], (token, token)):more
+            [] -> process args
+
+    listToArgs = map (\x -> ("", (x, x)))
 
 -- Is this an expansion of multiple items of an array?
 isArrayExpansion (T_DollarBraced _ _ l) =
@@ -217,6 +281,12 @@ getUnquotedLiteral (T_NormalWord _ list) =
     str _ = Nothing
 getUnquotedLiteral _ = Nothing
 
+isQuotes t =
+    case t of
+        T_DoubleQuoted {} -> True
+        T_SingleQuoted {} -> True
+        _ -> False
+
 -- Get the last unquoted T_Literal in a word like "${var}foo"THIS
 -- or nothing if the word does not end in an unquoted literal.
 getTrailingUnquotedLiteral :: Token -> Maybe Token
@@ -235,8 +305,11 @@ getTrailingUnquotedLiteral t =
 getLeadingUnquotedString :: Token -> Maybe String
 getLeadingUnquotedString t =
     case t of
-        T_NormalWord _ ((T_Literal _ s) : _) -> return s
+        T_NormalWord _ ((T_Literal _ s) : rest) -> return $ s ++ from rest
         _ -> Nothing
+  where
+    from ((T_Literal _ s):rest) = s ++ from rest
+    from _ = ""
 
 -- Maybe get the literal string of this token and any globs in it.
 getGlobOrLiteralString = getLiteralStringExt f
@@ -297,6 +370,37 @@ getLiteralStringExt more = g
 -- Is this token a string literal?
 isLiteral t = isJust $ getLiteralString t
 
+-- Escape user data for messages.
+-- Messages generally avoid repeating user data, but sometimes it's helpful.
+e4m = escapeForMessage
+escapeForMessage :: String -> String
+escapeForMessage str = concatMap f str
+  where
+    f '\\' = "\\\\"
+    f '\n' = "\\n"
+    f '\r' = "\\r"
+    f '\t' = "\\t"
+    f '\x1B' = "\\e"
+    f c =
+        if shouldEscape c
+        then
+            if ord c < 256
+            then "\\x" ++ (pad0 2 $ toHex c)
+            else "\\U" ++ (pad0 4 $ toHex c)
+        else [c]
+
+    shouldEscape c =
+        (not $ isPrint c)
+        || (not (isAscii c) && not (isLetter c))
+
+    pad0 :: Int -> String -> String
+    pad0 n s =
+        let l = length s in
+            if l < n
+            then (replicate (n-l) '0') ++ s
+            else s
+    toHex :: Char -> String
+    toHex c = map toUpper $ showHex (ord c) ""
 
 -- Turn a NormalWord like foo="bar $baz" into a series of constituent elements like [foo=,bar ,$baz]
 getWordParts (T_NormalWord _ l)   = concatMap getWordParts l
@@ -361,9 +465,10 @@ getCommandNameAndToken direct t = fromMaybe (Nothing, t) $ do
                 "busybox" -> firstArg
                 "builtin" -> firstArg
                 "command" -> firstArg
+                "run" -> firstArg -- Used by bats
                 "exec" -> do
-                    opts <- getBsdOpts "cla:" cmd
-                    (_, t) <- listToMaybe $ filter (null . fst) opts
+                    opts <- getBsdOpts "cla:" args
+                    (_, (t, _)) <- find (null . fst) opts
                     return t
                 _ -> fail ""
 
@@ -573,3 +678,43 @@ isAnnotationIgnoringCode code t =
   where
     hasNum (DisableComment from to) = code >= from && code < to
     hasNum _                   = False
+
+prop_executableFromShebang1 = executableFromShebang "/bin/sh" == "sh"
+prop_executableFromShebang2 = executableFromShebang "/bin/bash" == "bash"
+prop_executableFromShebang3 = executableFromShebang "/usr/bin/env ksh" == "ksh"
+prop_executableFromShebang4 = executableFromShebang "/usr/bin/env -S foo=bar bash -x" == "bash"
+prop_executableFromShebang5 = executableFromShebang "/usr/bin/env --split-string=bash -x" == "bash"
+prop_executableFromShebang6 = executableFromShebang "/usr/bin/env --split-string=foo=bar bash -x" == "bash"
+prop_executableFromShebang7 = executableFromShebang "/usr/bin/env --split-string bash -x" == "bash"
+prop_executableFromShebang8 = executableFromShebang "/usr/bin/env --split-string foo=bar bash -x" == "bash"
+prop_executableFromShebang9 = executableFromShebang "/usr/bin/env foo=bar dash" == "dash"
+prop_executableFromShebang10 = executableFromShebang "/bin/busybox sh" == "ash"
+prop_executableFromShebang11 = executableFromShebang "/bin/busybox ash" == "ash"
+
+-- Get the shell executable from a string like '/usr/bin/env bash'
+executableFromShebang :: String -> String
+executableFromShebang = shellFor
+  where
+    re = mkRegex "/env +(-S|--split-string=?)? *(.*)"
+    shellFor s | s `matches` re =
+        case matchRegex re s of
+            Just [flag, shell] -> fromEnvArgs (words shell)
+            _ -> ""
+    shellFor sb =
+        case words sb of
+            [] -> ""
+            [x] -> basename x
+            (first:second:args) | basename first == "busybox" ->
+                case basename second of
+                   "sh" -> "ash" -- busybox sh is ash
+                   x -> x
+            (first:args) | basename first == "env" ->
+                fromEnvArgs args
+            (first:_) -> basename first
+
+    fromEnvArgs args = fromMaybe "" $ find (notElem '=') $ skipFlags args
+    basename s = reverse . takeWhile (/= '/') . reverse $ s
+    skipFlags = dropWhile ("-" `isPrefixOf`)
+
+return []
+runTests = $quickCheckAll

@@ -253,6 +253,10 @@ prop_determineShell5 = determineShellTest "#shellcheck shell=sh\nfoo" == Sh
 prop_determineShell6 = determineShellTest "#! /bin/sh" == Sh
 prop_determineShell7 = determineShellTest "#! /bin/ash" == Dash
 prop_determineShell8 = determineShellTest' (Just Ksh) "#!/bin/sh" == Sh
+prop_determineShell9 = determineShellTest "#!/bin/env -S dash -x" == Dash
+prop_determineShell10 = determineShellTest "#!/bin/env --split-string= dash -x" == Dash
+prop_determineShell11 = determineShellTest "#!/bin/busybox sh" == Dash -- busybox sh is a specific shell, not posix sh
+prop_determineShell12 = determineShellTest "#!/bin/busybox ash" == Dash
 
 determineShellTest = determineShellTest' Nothing
 determineShellTest' fallbackShell = determineShell fallbackShell . fromJust . prRoot . pScript
@@ -266,22 +270,11 @@ determineShell fallbackShell t = fromMaybe Bash $
         headOrDefault (fromShebang s) [s | ShellOverride s <- annotations]
     fromShebang (T_Script _ (T_Literal _ s) _) = executableFromShebang s
 
--- Given a string like "/bin/bash" or "/usr/bin/env dash",
--- return the shell basename like "bash" or "dash"
-executableFromShebang :: String -> String
-executableFromShebang = shellFor
-  where
-    shellFor s | "/env " `isInfixOf` s = headOrDefault "" (drop 1 $ words s)
-    shellFor s | ' ' `elem` s = shellFor $ takeWhile (/= ' ') s
-    shellFor s = reverse . takeWhile (/= '/') . reverse $ s
-
-
-
 -- Given a root node, make a map from Id to parent Token.
 -- This is used to populate parentMap in Parameters
 getParentTree :: Token -> Map.Map Id Token
 getParentTree t =
-    snd . snd $ runState (doStackAnalysis pre post t) ([], Map.empty)
+    snd $ execState (doStackAnalysis pre post t) ([], Map.empty)
   where
     pre t = modify (first ((:) t))
     post t = do
@@ -381,8 +374,8 @@ usedAsCommandName tree token = go (getId token) (tail $ getPath tree token)
         | currentId == getId word = go id rest
     go currentId (T_DoubleQuoted id [word]:rest)
         | currentId == getId word = go id rest
-    go currentId (T_SimpleCommand _ _ (word:_):_)
-        | currentId == getId word = True
+    go currentId (t@(T_SimpleCommand _ _ (word:_)):_) =
+        getId word == currentId || getId (getCommandTokenOrThis t) == currentId
     go _ _ = False
 
 -- A list of the element and all its parents up to the root node.
@@ -562,6 +555,9 @@ getReferencedVariableCommand base@(T_SimpleCommand _ _ (T_NormalWord _ (T_Litera
                     (not $ any (`elem` flags) ["f", "F"])
             then concatMap getReference rest
             else []
+        "local" -> if "x" `elem` flags
+            then concatMap getReference rest
+            else []
         "trap" ->
             case rest of
                 head:_ -> map (\x -> (base, head, x)) $ getVariablesFromLiteralToken head
@@ -590,10 +586,14 @@ getModifiedVariableCommand base@(T_SimpleCommand id cmdPrefix (T_NormalWord _ (T
         "builtin" ->
             getModifiedVariableCommand $ T_SimpleCommand id cmdPrefix rest
         "read" ->
-            let params = map getLiteral rest
-                readArrayVars = getReadArrayVariables rest
-            in
-                catMaybes $ takeWhile isJust (reverse params) ++ readArrayVars
+            let fallback = catMaybes $ takeWhile isJust (reverse $ map getLiteral rest)
+            in fromMaybe fallback $ do
+                parsed <- getGnuOpts flagsForRead rest
+                case lookup "a" parsed of
+                    Just (_, var) -> (:[]) <$> getLiteralArray var
+                    Nothing -> return $ catMaybes $
+                        map (getLiteral . snd . snd) $ filter (null . fst) parsed
+
         "getopts" ->
             case rest of
                 opts:var:_ -> maybeToList $ getLiteral var
@@ -690,13 +690,11 @@ getModifiedVariableCommand base@(T_SimpleCommand id cmdPrefix (T_NormalWord _ (T
       where
         parseArgs :: Maybe (Token, Token, String, DataType)
         parseArgs = do
-            args <- getGnuOpts "d:n:O:s:u:C:c:t" base
-            let names = map snd $ filter (\(x,y) -> null x) args
-            if null names
-                then
+            args <- getGnuOpts "d:n:O:s:u:C:c:t" rest
+            case [y | ("",(_,y)) <- args] of
+                [] ->
                     return (base, base, "MAPFILE", DataArray SourceExternal)
-                else do
-                    first <- listToMaybe names
+                first:_ -> do
                     name <- getLiteralString first
                     guard $ isVariableName name
                     return (base, first, name, DataArray SourceExternal)
@@ -709,16 +707,6 @@ getModifiedVariableCommand base@(T_SimpleCommand id cmdPrefix (T_NormalWord _ (T
             name <- getLiteralString arg
             guard $ isVariableName name
             return (name, arg)
-
-    -- get all the array variables used in read, e.g. read -a arr
-    getReadArrayVariables args =
-        map (getLiteralArray . snd)
-            (filter (isArrayFlag . fst) (zip args (tail args)))
-
-    isArrayFlag x = case getLiteralString x of
-                       Just ('-':'-':_) -> False
-                       Just ('-':str) -> 'a' `elem` str
-                       _ -> False
 
     -- get the FLAGS_ variable created by a shflags DEFINE_ call
     getFlagVariable (n:v:_) = do
@@ -860,6 +848,7 @@ prop_getBracedReference8 = getBracedReference "foo-bar" == "foo"
 prop_getBracedReference9 = getBracedReference "foo:-bar" == "foo"
 prop_getBracedReference10= getBracedReference "foo: -1" == "foo"
 prop_getBracedReference11= getBracedReference "!os*" == ""
+prop_getBracedReference11b= getBracedReference "!os@" == ""
 prop_getBracedReference12= getBracedReference "!os?bar**" == ""
 prop_getBracedReference13= getBracedReference "foo[bar]" == "foo"
 getBracedReference s = fromMaybe s $
@@ -878,7 +867,7 @@ getBracedReference s = fromMaybe s $
     nameExpansion ('!':next:rest) = do -- e.g. ${!foo*bar*}
         guard $ isVariableChar next -- e.g. ${!@}
         first <- find (not . isVariableChar) rest
-        guard $ first `elem` "*?"
+        guard $ first `elem` "*?@"
         return ""
     nameExpansion _ = Nothing
 
