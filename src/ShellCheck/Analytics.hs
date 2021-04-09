@@ -731,7 +731,7 @@ checkFindExec _ _ = return ()
 
 
 commandNeverProducesSpaces params t =
-    isPortageBuild params && maybe False (`elem` ["usev", "use_with", "use_enable"]) (getCommandNameFromExpansion t)
+    isPortageBuild params && maybe False (`elem` ["usev", "use_with", "use_enable", "meson_use", "meson_feature"]) (getCommandNameFromExpansion t)
 
 
 prop_checkUnquotedExpansions1 = verify checkUnquotedExpansions "rm $(ls)"
@@ -3413,6 +3413,10 @@ prop_checkSplittingInArraysUseWith1 = verify checkSplittingInArrays "a=( $(use_w
 prop_checkSplittingInArraysUseWith2 = verifyNot (withPortageParams checkSplittingInArrays) "a=( $(use_with b) )"
 prop_checkSplittingInArraysUseEnable1 = verify checkSplittingInArrays "a=( `use_enable b` )"
 prop_checkSplittingInArraysUseEnable2 = verifyNot (withPortageParams checkSplittingInArrays) "a=( `use_enable b` )"
+prop_checkSplittingInArraysMesonUse1 = verify checkSplittingInArrays "a=( `meson_use b` )"
+prop_checkSplittingInArraysMesonUse2 = verifyNot (withPortageParams checkSplittingInArrays) "a=( `meson_use b` )"
+prop_checkSplittingInArraysMesonFeature1 = verify checkSplittingInArrays "a=( `meson_feature b` )"
+prop_checkSplittingInArraysMesonFeature2 = verifyNot (withPortageParams checkSplittingInArrays) "a=( `meson_feature b` )"
 checkSplittingInArrays params t =
     case t of
         T_Array _ elements -> mapM_ check elements
