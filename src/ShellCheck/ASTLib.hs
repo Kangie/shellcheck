@@ -485,6 +485,20 @@ getCommandNameFromExpansion t =
     extract (T_Pipeline _ _ [cmd]) = getCommandName cmd
     extract _ = Nothing
 
+-- If a command substitution is a single command, get its argument Tokens.
+-- Return an empty list if there are no arguments or the token is not a command substitution.
+-- $(date +%s) = ["+%s"]
+getArgumentsFromExpansion :: Token -> [Token]
+getArgumentsFromExpansion t =
+    case t of
+        T_DollarExpansion _ [c] -> extract c
+        T_Backticked _ [c] -> extract c
+        T_DollarBraceCommandExpansion _ [c] -> extract c
+        _ -> []
+  where
+    extract (T_Pipeline _ _ [cmd]) = arguments cmd
+    extract _ = []
+
 -- Get the basename of a token representing a command
 getCommandBasename = fmap basename . getCommandName
 

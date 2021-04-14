@@ -731,8 +731,32 @@ checkFindExec _ _ = return ()
 
 
 commandNeverProducesSpaces params t =
-    isPortageBuild params && maybe False (`elem` ["usev", "use_with", "use_enable", "meson_use", "meson_feature"]) (getCommandNameFromExpansion t)
-
+    maybe False (`elem` noSpaceCommands) cmd
+    || (maybe False (`elem` spacesFromArgsCommands) cmd && noArgsHaveSpaces t)
+  where
+    cmd = getCommandNameFromExpansion t
+    noSpaceCommands =
+        if isPortageBuild params
+        then
+            [
+              "usev"
+            , "use_with"
+            , "use_enable"
+            ]
+        else
+            []
+    spacesFromArgsCommands =
+        if isPortageBuild params
+        then
+            [
+              "usex"
+            , "meson_use"
+            , "meson_feature"
+            ]
+        else
+            []
+    noArgsHaveSpaces t = all (' ' `notElem`) (words $ getArgumentsFromExpansion t)
+    words = map $ getLiteralStringDef " "
 
 prop_checkUnquotedExpansions1 = verify checkUnquotedExpansions "rm $(ls)"
 prop_checkUnquotedExpansions1a= verify checkUnquotedExpansions "rm `ls`"
@@ -747,6 +771,9 @@ prop_checkUnquotedExpansions8 = verifyNot checkUnquotedExpansions "set -- $(seq 
 prop_checkUnquotedExpansions9 = verifyNot checkUnquotedExpansions "echo foo `# inline comment`"
 prop_checkUnquotedExpansionsUsev = verify checkUnquotedExpansions "echo $(usev X)"
 prop_checkUnquotedExpansionsPortageUsev = verifyNot (withPortageParams checkUnquotedExpansions) "echo $(usev X)"
+prop_checkUnquotedExpansionsUsex = verify checkUnquotedExpansions "echo $(usex X)"
+prop_checkUnquotedExpansionsPortageUsex1 = verifyNot (withPortageParams checkUnquotedExpansions) "echo $(usex X \"\" Y)"
+prop_checkUnquotedExpansionsPortageUsex2 = verify (withPortageParams checkUnquotedExpansions) "echo $(usex X \"Y Z\" W)"
 checkUnquotedExpansions params =
     check
   where
@@ -3417,6 +3444,10 @@ prop_checkSplittingInArraysMesonUse1 = verify checkSplittingInArrays "a=( `meson
 prop_checkSplittingInArraysMesonUse2 = verifyNot (withPortageParams checkSplittingInArrays) "a=( `meson_use b` )"
 prop_checkSplittingInArraysMesonFeature1 = verify checkSplittingInArrays "a=( `meson_feature b` )"
 prop_checkSplittingInArraysMesonFeature2 = verifyNot (withPortageParams checkSplittingInArrays) "a=( `meson_feature b` )"
+prop_checkSplittingInArraysUsex1 = verify checkSplittingInArrays "a=( $(usex X Y Z) )"
+prop_checkSplittingInArraysUsex2 = verify (withPortageParams checkSplittingInArrays) "a=( `usex X \"Y Z\" W` )"
+prop_checkSplittingInArraysUsex3 = verify (withPortageParams checkSplittingInArrays) "a=( `usex X \"${VAR}\" W` )"
+prop_checkSPlittingInArraysUsex4 = verifyNot (withPortageParams checkSplittingInArrays) "a=( `usex X Y Z` )"
 checkSplittingInArrays params t =
     case t of
         T_Array _ elements -> mapM_ check elements
