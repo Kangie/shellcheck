@@ -116,7 +116,10 @@ portageManualInternalVariables = [
     "mydoc",
 
     -- python-utils-r1.eclass declared incorrectly
-    "RESTRICT_PYTHON_ABIS", "PYTHON_MODNAME"
+    "RESTRICT_PYTHON_ABIS", "PYTHON_MODNAME",
+
+    -- ABI variables
+    "ABI", "DEFAULT_ABI"
   ]
 
 eclassVarsFromMap :: String -> [String]
