@@ -165,6 +165,10 @@ portageArrayVariables = [
     "PATCHES"
   ]
 
+portageBuildFlagVariables = [
+    "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS"
+  ]
+
 commonCommands = [
     "admin", "alias", "ar", "asa", "at", "awk", "basename", "batch",
     "bc", "bg", "break", "c99", "cal", "cat", "cd", "cflow", "chgrp",

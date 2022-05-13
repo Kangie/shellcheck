@@ -563,12 +563,22 @@ getReferencedVariableCommand base@(T_SimpleCommand _ _ (T_NormalWord _ (T_Litera
                 head:_ -> map (\x -> (base, head, x)) $ getVariablesFromLiteralToken head
                 _ -> []
         "alias" -> [(base, token, name) | token <- rest, name <- getVariablesFromLiteralToken token]
+
+        -- tc-export makes a list of toolchain variables available, similar to export.
+        -- Usage tc-export CC CXX
+        "tc-export" -> concatMap getReference rest
+
+        -- tc-export_build_env exports the listed variables plus a bunch of BUILD_XX variables.
+        -- Usage tc-export_build_env BUILD_CC
+        "tc-export_build_env" -> concatMap getReference rest  ++ concatMap buildVarReferences portageBuildFlagVariables
+
         _ -> []
   where
     getReference t@(T_Assignment _ _ name _ value) = [(t, t, name)]
     getReference t@(T_NormalWord _ [T_Literal _ name]) | not ("-" `isPrefixOf` name) = [(t, t, name)]
     getReference _ = []
     flags = map snd $ getAllFlags base
+    buildVarReferences var = [(base, base, "BUILD_" ++ var), (base, base, var ++ "_FOR_BUILD")]
 
 getReferencedVariableCommand _ = []
 
@@ -625,6 +635,13 @@ getModifiedVariableCommand base@(T_SimpleCommand id cmdPrefix (T_NormalWord _ (T
         "DEFINE_float" -> maybeToList $ getFlagVariable rest
         "DEFINE_integer" -> maybeToList $ getFlagVariable rest
         "DEFINE_string" -> maybeToList $ getFlagVariable rest
+
+        -- tc-export creates all the variables passed to it
+        "tc-export" -> concatMap getModifierParamString rest
+
+        -- tc-export_build_env creates all the variables passed to it
+        -- plus several BUILD_ and _FOR_BUILD variables.
+        "tc-export_build_env" -> concatMap getModifierParamString rest ++ getBuildEnvTokens
 
         _ -> []
   where
@@ -713,6 +730,10 @@ getModifiedVariableCommand base@(T_SimpleCommand id cmdPrefix (T_NormalWord _ (T
         name <- getLiteralString n
         return (base, n, "FLAGS_" ++ name, DataString $ SourceExternal)
     getFlagVariable _ = Nothing
+
+    getBuildEnvTokens = concatMap buildVarTokens portageBuildFlagVariables
+    buildVarTokens var = [(base, base, "BUILD_" ++ var, DataString $ SourceExternal),
+                         (base, base, var ++ "_FOR_BUILD", DataString $ SourceExternal)]
 
 getModifiedVariableCommand _ = []
 

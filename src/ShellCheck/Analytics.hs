@@ -2343,6 +2343,9 @@ prop_checkUnused_portageInheritedVarAssignNoInherit=
 prop_checkUnused_portageInheritedVarAssignNoInheritOrPortage=
     verifyTree checkUnusedAssignments
                "CARGO_INSTALL_PATH=2"
+prop_checkUnusedTcExport= verifyNotTree checkUnusedAssignments "tc-export CC; echo $CC"
+prop_checkUnusedTcExportBuildEnv= verifyNotTree checkUnusedAssignments "tc-export_build_env CC; echo $CC $BUILD_CFLAGS $CFLAGS_FOR_BUILD"
+
 checkUnusedAssignments params t = execWriter (mapM_ warnFor unused)
   where
     flow = variableFlow params
