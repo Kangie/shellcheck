@@ -49,7 +49,7 @@ kshInternalVariables = [
 portageManualInternalVariables = [
     -- toolchain settings
     "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "FFLAGS", "FCFLAGS",
-    "CBUILD", "CHOST"
+    "CBUILD", "CHOST", "MAKEOPTS"
     -- TODO: Delete these if we can handle `tc-export CC` implicit export.
     , "CC", "CPP", "CXX"
 
