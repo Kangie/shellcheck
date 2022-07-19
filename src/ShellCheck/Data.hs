@@ -4,9 +4,27 @@ import qualified Data.Map
 import ShellCheck.Interface
 import ShellCheck.PortageAutoInternalVariables
 import Data.Version (showVersion)
-import Paths_ShellCheck (version)
 
-shellcheckVersion = showVersion version -- VERSIONSTRING
+
+{-
+If you are here because you saw an error about Paths_ShellCheck in this file,
+simply comment out the import below and define the version as a constant string.
+
+Instead of:
+
+    import Paths_ShellCheck (version)
+    shellcheckVersion = showVersion version
+
+Use:
+
+    -- import Paths_ShellCheck (version)
+    shellcheckVersion = "kludge"
+
+-}
+
+import Paths_ShellCheck (version)
+shellcheckVersion = showVersion version  -- VERSIONSTRING
+
 
 genericInternalVariables = [
     -- Generic
@@ -138,11 +156,13 @@ portageInternalVariables inheritedEclasses =
     portageManualInternalVariables ++ concatMap eclassVarsFromMap
                                                 inheritedEclasses
 
-specialVariablesWithoutSpaces = [
-    "$", "-", "?", "!", "#"
+specialIntegerVariables = [
+    "$", "?", "!", "#"
   ]
 
-shellVariablesWithoutSpaces = specialVariablesWithoutSpaces ++ [
+specialVariablesWithoutSpaces = "-" : specialIntegerVariables
+
+variablesWithoutSpaces = specialVariablesWithoutSpaces ++ [
     "BASHPID", "BASH_ARGC", "BASH_LINENO", "BASH_SUBSHELL", "EUID", "LINENO",
     "OPTIND", "PPID", "RANDOM", "SECONDS", "SHELLOPTS", "SHLVL", "UID",
     "COLUMNS", "HISTFILESIZE", "HISTSIZE", "LINES"

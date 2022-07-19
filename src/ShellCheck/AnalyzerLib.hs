@@ -23,9 +23,11 @@ module ShellCheck.AnalyzerLib where
 
 import ShellCheck.AST
 import ShellCheck.ASTLib
+import qualified ShellCheck.CFGAnalysis as CF
 import ShellCheck.Data
 import ShellCheck.Interface
 import ShellCheck.Parser
+import ShellCheck.Prelude
 import ShellCheck.Regex
 
 import Control.Arrow (first)
@@ -99,6 +101,8 @@ data Parameters = Parameters {
     tokenPositions     :: Map.Map Id (Position, Position),
     -- detailed type of any Portage related file
     portageFileType    :: PortageFileType
+    -- Result from Control Flow Graph analysis (including data flow analysis)
+    cfgAnalysis :: CF.CFGAnalysis
     } deriving (Show)
 
 isPortageBuild :: Parameters -> Bool
@@ -206,8 +210,9 @@ makeCommentWithFix severity id code str fix =
         }
     in force withFix
 
-makeParameters spec =
-    let params = Parameters {
+makeParameters spec = params
+  where
+    params = Parameters {
         rootNode = root,
         shellType = fromMaybe (determineShell (asFallbackShell spec) root) $ asShellType spec,
         hasSetE = containsSetE root,
@@ -236,6 +241,13 @@ makeParameters spec =
         portageFileType = asPortageFileType spec
     } in params
   where root = asScript spec
+        cfgAnalysis = CF.analyzeControlFlow cfParams root
+    }
+    cfParams = CF.CFGParameters {
+        CF.cfLastpipe = hasLastpipe params,
+        CF.cfPipefail = hasPipefail params
+    }
+    root = asScript spec
 
 
 -- Does this script mention 'set -e' anywhere?
@@ -426,12 +438,6 @@ usedAsCommandName tree token = go (getId token) (tail $ getPath tree token)
         getId word == currentId || getId (getCommandTokenOrThis t) == currentId
     go _ _ = False
 
--- A list of the element and all its parents up to the root node.
-getPath tree t = t :
-    case Map.lookup (getId t) tree of
-        Nothing     -> []
-        Just parent -> getPath tree parent
-
 -- Version of the above taking the map from the current context
 -- Todo: give this the name "getPath"
 getPathM t = do
@@ -576,12 +582,6 @@ getModifiedVariables t =
                     guard $ isVariableName str
                     return (place, t, str, DataString SourceChecked)
             _ -> Nothing
-
-isClosingFileOp op =
-    case op of
-        T_IoDuplicate _ (T_GREATAND _) "-" -> True
-        T_IoDuplicate _ (T_LESSAND  _) "-" -> True
-        _                                  -> False
 
 
 -- Consider 'export/declare -x' a reference, since it makes the var available
@@ -785,13 +785,6 @@ getModifiedVariableCommand base@(T_SimpleCommand id cmdPrefix (T_NormalWord _ (T
 
 getModifiedVariableCommand _ = []
 
-getIndexReferences s = fromMaybe [] $ do
-    match <- matchRegex re s
-    index <- match !!! 0
-    return $ matchAllStrings variableNameRegex index
-  where
-    re = mkRegex "(\\[.*\\])"
-
 -- Given a NormalWord like foo or foo[$bar], get foo.
 -- Primarily used to get references for [[ -v foo[bar] ]]
 getVariableForTestDashV :: Token -> Maybe String
@@ -805,18 +798,6 @@ getVariableForTestDashV t = do
     -- Turn foo[$x] into foo[\0] so that we can get the constant array name
     -- in a non-constant expression (while filtering out foo$x[$y])
     toStr _ = return "\0"
-
-prop_getOffsetReferences1 = getOffsetReferences ":bar" == ["bar"]
-prop_getOffsetReferences2 = getOffsetReferences ":bar:baz" == ["bar", "baz"]
-prop_getOffsetReferences3 = getOffsetReferences "[foo]:bar" == ["bar"]
-prop_getOffsetReferences4 = getOffsetReferences "[foo]:bar:baz" == ["bar", "baz"]
-getOffsetReferences mods = fromMaybe [] $ do
--- if mods start with [, then drop until ]
-    match <- matchRegex re mods
-    offsets <- match !!! 1
-    return $ matchAllStrings variableNameRegex offsets
-  where
-    re = mkRegex "^(\\[.+\\])? *:([^-=?+].*)"
 
 getReferencedVariables parents t =
     case t of
@@ -896,17 +877,6 @@ isConfusedGlobRegex ('*':_) = True
 isConfusedGlobRegex [x,'*'] | x `notElem` "\\." = True
 isConfusedGlobRegex _       = False
 
-isVariableStartChar x = x == '_' || isAsciiLower x || isAsciiUpper x
-isVariableChar x = isVariableStartChar x || isDigit x
-isSpecialVariableChar = (`elem` "*@#?-$!")
-variableNameRegex = mkRegex "[_a-zA-Z][_a-zA-Z0-9]*"
-
-prop_isVariableName1 = isVariableName "_fo123"
-prop_isVariableName2 = not $ isVariableName "4"
-prop_isVariableName3 = not $ isVariableName "test: "
-isVariableName (x:r) = isVariableStartChar x && all isVariableChar r
-isVariableName _     = False
-
 getVariablesFromLiteralToken token =
     getVariablesFromLiteral (getLiteralStringDef " " token)
 
@@ -919,73 +889,6 @@ getVariablesFromLiteral string =
   where
     variableRegex = mkRegex "\\$\\{?([A-Za-z0-9_]+)"
 
--- Get the variable name from an expansion like ${var:-foo}
-prop_getBracedReference1 = getBracedReference "foo" == "foo"
-prop_getBracedReference2 = getBracedReference "#foo" == "foo"
-prop_getBracedReference3 = getBracedReference "#" == "#"
-prop_getBracedReference4 = getBracedReference "##" == "#"
-prop_getBracedReference5 = getBracedReference "#!" == "!"
-prop_getBracedReference6 = getBracedReference "!#" == "#"
-prop_getBracedReference7 = getBracedReference "!foo#?" == "foo"
-prop_getBracedReference8 = getBracedReference "foo-bar" == "foo"
-prop_getBracedReference9 = getBracedReference "foo:-bar" == "foo"
-prop_getBracedReference10= getBracedReference "foo: -1" == "foo"
-prop_getBracedReference11= getBracedReference "!os*" == ""
-prop_getBracedReference11b= getBracedReference "!os@" == ""
-prop_getBracedReference12= getBracedReference "!os?bar**" == ""
-prop_getBracedReference13= getBracedReference "foo[bar]" == "foo"
-getBracedReference s = fromMaybe s $
-    nameExpansion s `mplus` takeName noPrefix `mplus` getSpecial noPrefix `mplus` getSpecial s
-  where
-    noPrefix = dropPrefix s
-    dropPrefix (c:rest) | c `elem` "!#" = rest
-    dropPrefix cs = cs
-    takeName s = do
-        let name = takeWhile isVariableChar s
-        guard . not $ null name
-        return name
-    getSpecial (c:_) | isSpecialVariableChar c = return [c]
-    getSpecial _ = fail "empty or not special"
-
-    nameExpansion ('!':next:rest) = do -- e.g. ${!foo*bar*}
-        guard $ isVariableChar next -- e.g. ${!@}
-        first <- find (not . isVariableChar) rest
-        guard $ first `elem` "*?@"
-        return ""
-    nameExpansion _ = Nothing
-
-prop_getBracedModifier1 = getBracedModifier "foo:bar:baz" == ":bar:baz"
-prop_getBracedModifier2 = getBracedModifier "!var:-foo" == ":-foo"
-prop_getBracedModifier3 = getBracedModifier "foo[bar]" == "[bar]"
-prop_getBracedModifier4 = getBracedModifier "foo[@]@Q" == "[@]@Q"
-prop_getBracedModifier5 = getBracedModifier "@@Q" == "@Q"
-getBracedModifier s = headOrDefault "" $ do
-    let var = getBracedReference s
-    a <- dropModifier s
-    dropPrefix var a
-  where
-    dropPrefix [] t        = return t
-    dropPrefix (a:b) (c:d) | a == c = dropPrefix b d
-    dropPrefix _ _         = []
-
-    dropModifier (c:rest) | c `elem` "#!" = [rest, c:rest]
-    dropModifier x        = [x]
-
--- Useful generic functions.
-
--- Get element 0 or a default. Like `head` but safe.
-headOrDefault _ (a:_) = a
-headOrDefault def _   = def
-
--- Get the last element or a default. Like `last` but safe.
-lastOrDefault def [] = def
-lastOrDefault _ list = last list
-
---- Get element n of a list, or Nothing. Like `!!` but safe.
-(!!!) list i =
-    case drop i list of
-        []    -> Nothing
-        (r:_) -> Just r
 
 -- Run a command if the shell is in the given list
 whenShell l c = do
@@ -1037,17 +940,6 @@ isBashLike params =
         Ksh -> True
         Dash -> False
         Sh -> False
-
--- Returns whether a token is a parameter expansion without any modifiers.
--- True for $var ${var} $1 $#
--- False for ${#var} ${var[x]} ${var:-0}
-isUnmodifiedParameterExpansion t =
-    case t of
-        T_DollarBraced _ False _ -> True
-        T_DollarBraced _ _ list ->
-            let str = concat $ oversimplify list
-            in getBracedReference str == str
-        _ -> False
 
 isTrueAssignmentSource c =
     case c of
