@@ -557,6 +557,7 @@ prop_checkPipePitfalls19 = verifyNot checkPipePitfalls "foo | grep -A2 bar | wc 
 prop_checkPipePitfalls20 = verifyNot checkPipePitfalls "foo | grep -B999 bar | wc -l"
 prop_checkPipePitfalls21 = verifyNot checkPipePitfalls "foo | grep --after-context 999 bar | wc -l"
 prop_checkPipePitfalls22 = verifyNot checkPipePitfalls "foo | grep -B 1 --after-context 999 bar | wc -l"
+prop_checkPipePitfalls23 = verifyNot checkPipePitfalls "ps -o pid,args -p $(pgrep java) | grep -F net.shellcheck.Test"
 checkPipePitfalls _ (T_Pipeline id _ commands) = do
     for ["find", "xargs"] $
         \(find:xargs:_) ->
@@ -570,8 +571,15 @@ checkPipePitfalls _ (T_Pipeline id _ commands) = do
               ]) $ warn (getId find) 2038
                       "Use -print0/-0 or -exec + to allow for non-alphanumeric filenames."
 
-    for' ["ps", "grep"] $
-        \x -> info x 2009 "Consider using pgrep instead of grepping ps output."
+    for ["ps", "grep"] $
+        \(ps:grep:_) ->
+            let
+                psFlags = maybe [] (map snd . getAllFlags) $ getCommand ps
+            in
+                -- There are many ways to specify a pid: 1, -1, p 1, wup 1, -q 1, -p 1, --pid 1.
+                -- For simplicity we only deal with the most canonical looking flags:
+                unless (any (`elem` ["p", "pid", "q", "quick-pid"]) psFlags) $
+                    info (getId ps) 2009 "Consider using pgrep instead of grepping ps output."
 
     for ["grep", "wc"] $
         \(grep:wc:_) ->
@@ -822,6 +830,7 @@ prop_checkUnquotedExpansionsUsex = verify checkUnquotedExpansions "echo $(usex X
 prop_checkUnquotedExpansionsPortageUsex1 = verifyNot (withPortageParams checkUnquotedExpansions) "echo $(usex X \"\" Y)"
 prop_checkUnquotedExpansionsPortageUsex2 = verify (withPortageParams checkUnquotedExpansions) "echo $(usex X \"Y Z\" W)"
 prop_checkUnquotedExpansions10 = verify checkUnquotedExpansions "#!/bin/sh\nexport var=$(val)"
+prop_checkUnquotedExpansions11 = verifyNot checkUnquotedExpansions "ps -p $(pgrep foo)"
 checkUnquotedExpansions params =
     check
   where
@@ -835,7 +844,7 @@ checkUnquotedExpansions params =
             warn (getId t) 2046 "Quote this to prevent word splitting."
 
     shouldBeSplit t =
-        getCommandNameFromExpansion t == Just "seq"
+        getCommandNameFromExpansion t `elem` [Just "seq", Just "pgrep"]
 
 
 prop_checkRedirectToSame = verify checkRedirectToSame "cat foo > foo"
