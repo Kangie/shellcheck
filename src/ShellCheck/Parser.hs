@@ -1,5 +1,5 @@
 {-
-    Copyright 2012-2019 Vidar Holen
+    Copyright 2012-2021 Vidar Holen
 
     This file is part of ShellCheck.
     https://www.shellcheck.net
@@ -37,7 +37,7 @@ import Data.Functor
 import Data.List (isPrefixOf, isInfixOf, isSuffixOf, partition, sortBy, intercalate, nub, find)
 import Data.Maybe
 import Data.Monoid
-import Debug.Trace
+import Debug.Trace -- STRIP
 import GHC.Exts (sortWith)
 import Prelude hiding (readList)
 import System.IO
@@ -66,7 +66,7 @@ doubleQuote = char '"'
 variableStart = upper <|> lower <|> oneOf "_"
 variableChars = upper <|> lower <|> digit <|> oneOf "_"
 -- Chars to allow in function names
-functionChars = variableChars <|> oneOf ":+?-./^@"
+functionChars = variableChars <|> oneOf ":+?-./^@,"
 -- Chars to allow in functions using the 'function' keyword
 extendedFunctionChars = functionChars <|> oneOf "[]*=!"
 specialVariable = oneOf (concat specialVariables)
@@ -984,12 +984,13 @@ prop_readAnnotation4 = isWarning readAnnotation "# shellcheck cats=dogs disable=
 prop_readAnnotation5 = isOk readAnnotation "# shellcheck disable=SC2002 # All cats are precious\n"
 prop_readAnnotation6 = isOk readAnnotation "# shellcheck disable=SC1234 # shellcheck foo=bar\n"
 prop_readAnnotation7 = isOk readAnnotation "# shellcheck disable=SC1000,SC2000-SC3000,SC1001\n"
+prop_readAnnotation8 = isOk readAnnotation "# shellcheck disable=all\n"
 readAnnotation = called "shellcheck directive" $ do
     try readAnnotationPrefix
     many1 linewhitespace
-    readAnnotationWithoutPrefix
+    readAnnotationWithoutPrefix True
 
-readAnnotationWithoutPrefix = do
+readAnnotationWithoutPrefix sandboxed = do
     values <- many1 readKey
     optional readAnyComment
     void linefeed <|> eof <|> do
@@ -1004,8 +1005,12 @@ readAnnotationWithoutPrefix = do
         key <- many1 (letter <|> char '-')
         char '=' <|> fail "Expected '=' after directive key"
         annotations <- case key of
-            "disable" -> readRange `sepBy` char ','
+            "disable" -> readElement `sepBy` char ','
               where
+                readElement = readRange <|> readAll
+                readAll = do
+                    string "all"
+                    return $ DisableComment 0 1000000
                 readRange = do
                     from <- readCode
                     to <- choice [ char '-' *> readCode, return $ from+1 ]
@@ -1034,6 +1039,21 @@ readAnnotationWithoutPrefix = do
                     parseNoteAt pos ErrorC 1103
                         "This shell type is unknown. Use e.g. sh or bash."
                 return [ShellOverride shell]
+
+            "external-sources" -> do
+                pos <- getPosition
+                value <- many1 letter
+                case value of
+                    "true" ->
+                        if sandboxed
+                        then do
+                            parseNoteAt pos ErrorC 1144 "external-sources can only be enabled in .shellcheckrc, not in individual files."
+                            return []
+                        else return [ExternalSources True]
+                    "false" -> return [ExternalSources False]
+                    _ -> do
+                        parseNoteAt pos ErrorC 1145 "Unknown external-sources value. Expected true/false."
+                        return []
 
             _ -> do
                 parseNoteAt keyPos WarningC 1107 "This directive is unknown. It will be ignored."
@@ -1372,6 +1392,8 @@ prop_readGlob5 = isOk readGlob "[^[:alpha:]1-9]"
 prop_readGlob6 = isOk readGlob "[\\|]"
 prop_readGlob7 = isOk readGlob "[^[]"
 prop_readGlob8 = isOk readGlob "[*?]"
+prop_readGlob9 = isOk readGlob "[!]^]"
+prop_readGlob10 = isOk readGlob "[]]"
 readGlob = readExtglob <|> readSimple <|> readClass <|> readGlobbyLiteral
     where
         readSimple = do
@@ -1379,22 +1401,25 @@ readGlob = readExtglob <|> readSimple <|> readClass <|> readGlobbyLiteral
             c <- oneOf "*?"
             id <- endSpan start
             return $ T_Glob id [c]
-        -- Doesn't handle weird things like [^]a] and [$foo]. fixme?
         readClass = try $ do
             start <- startSpan
             char '['
-            s <- many1 (predefined <|> readNormalLiteralPart "]" <|> globchars)
+            negation <- charToString (oneOf "!^") <|> return ""
+            leadingBracket <- charToString (oneOf "]") <|> return ""
+            s <- many (predefined <|> readNormalLiteralPart "]" <|> globchars)
+            guard $ not (null leadingBracket) || not (null s)
             char ']'
             id <- endSpan start
-            return $ T_Glob id $ "[" ++ concat s ++ "]"
+            return $ T_Glob id $ "[" ++ concat (negation:leadingBracket:s) ++ "]"
           where
-           globchars = fmap return . oneOf $ "!$[" ++ extglobStartChars
+           globchars = charToString $ oneOf $ "![" ++ extglobStartChars
            predefined = do
               try $ string "[:"
               s <- many1 letter
               string ":]"
               return $ "[:" ++ s ++ ":]"
 
+        charToString = fmap return
         readGlobbyLiteral = do
             start <- startSpan
             c <- extglobStart <|> char '['
@@ -1486,7 +1511,6 @@ readSingleEscaped = do
 
     case x of
         '\'' -> parseProblemAt pos InfoC 1003 "Want to escape a single quote? echo 'This is how it'\\''s done'.";
-        '\n' -> parseProblemAt pos InfoC 1004 "This backslash+linefeed is literal. Break outside single quotes if you just want to break the line."
         _ -> return ()
 
     return [s]
@@ -1996,12 +2020,14 @@ readHereString = called "here string" $ do
     word <- readNormalWord
     return $ T_HereString id word
 
+prop_readNewlineList1 = isOk readScript "&> /dev/null echo foo"
 readNewlineList =
     many1 ((linefeed <|> carriageReturn) `thenSkip` spacing) <* checkBadBreak
   where
     checkBadBreak = optional $ do
                 pos <- getPosition
                 try $ lookAhead (oneOf "|&") --  See if the next thing could be |, || or &&
+                notFollowedBy2 (string "&>") --  Except &> or &>> which is valid
                 parseProblemAt pos ErrorC 1133
                     "Unexpected start of line. If breaking lines, |/||/&& should be at the end of the previous one."
 readLineBreak = optional readNewlineList
@@ -2061,6 +2087,7 @@ prop_readSimpleCommand4 = isOk readSimpleCommand "typeset -a foo=(lol)"
 prop_readSimpleCommand5 = isOk readSimpleCommand "time if true; then echo foo; fi"
 prop_readSimpleCommand6 = isOk readSimpleCommand "time -p ( ls -l; )"
 prop_readSimpleCommand7 = isOk readSimpleCommand "\\ls"
+prop_readSimpleCommand7b = isOk readSimpleCommand "\\:"
 prop_readSimpleCommand8 = isWarning readSimpleCommand "// Lol"
 prop_readSimpleCommand9 = isWarning readSimpleCommand "/* Lolbert */"
 prop_readSimpleCommand10 = isWarning readSimpleCommand "/**** Lolbert */"
@@ -2168,10 +2195,12 @@ readSource t@(T_Redirecting _ _ (T_SimpleCommand cmdId _ (cmd:file':rest'))) = d
                     if filename == "/dev/null" -- always allow /dev/null
                     then return (Right "", filename)
                     else do
+                        allAnnotations <- getCurrentAnnotations True
                         currentScript <- Mr.asks currentFilename
-                        paths <- mapMaybe getSourcePath <$> getCurrentAnnotations True
-                        resolved <- system $ siFindSource sys currentScript paths filename
-                        contents <- system $ siReadFile sys resolved
+                        let paths = mapMaybe getSourcePath allAnnotations
+                        let externalSources = listToMaybe $ mapMaybe getExternalSources allAnnotations
+                        resolved <- system $ siFindSource sys currentScript externalSources paths filename
+                        contents <- system $ siReadFile sys externalSources resolved
                         return (contents, resolved)
                 case input of
                     Left err -> do
@@ -2203,6 +2232,11 @@ readSource t@(T_Redirecting _ _ (T_SimpleCommand cmdId _ (cmd:file':rest'))) = d
     getSourcePath t =
         case t of
             SourcePath x -> Just x
+            _ -> Nothing
+
+    getExternalSources t =
+        case t of
+            ExternalSources b -> Just b
             _ -> Nothing
 
     -- If the word has a single expansion as the directory, try stripping it
@@ -2321,7 +2355,7 @@ readCmdName = do
     -- Ignore alias suppression
     optional . try $ do
         char '\\'
-        lookAhead $ variableChars
+        lookAhead $ variableChars <|> oneOf ":."
     readCmdWord
 
 readCmdWord = do
@@ -2807,7 +2841,7 @@ readLetSuffix = many1 (readIoRedirect <|> try readLetExpression <|> readCmdWord)
         startPos <- getPosition
         expression <- readStringForParser readCmdWord
         let (unQuoted, newPos) = kludgeAwayQuotes expression startPos
-        subParse newPos readArithmeticContents unQuoted
+        subParse newPos (readArithmeticContents <* eof) unQuoted
 
     kludgeAwayQuotes :: String -> SourcePos -> (String, SourcePos)
     kludgeAwayQuotes s p =
@@ -3194,7 +3228,7 @@ prop_readConfigKVs4 = isOk readConfigKVs "\n\n\n\n\t \n"
 prop_readConfigKVs5 = isOk readConfigKVs "# shellcheck accepts annotation-like comments in rc files\ndisable=1234"
 readConfigKVs = do
     anySpacingOrComment
-    annotations <- many (readAnnotationWithoutPrefix <* anySpacingOrComment)
+    annotations <- many (readAnnotationWithoutPrefix False <* anySpacingOrComment)
     eof
     return $ concat annotations
 anySpacingOrComment =
@@ -3338,13 +3372,13 @@ parsesCleanly parser string = runIdentity $ do
 
 -- For printf debugging: print the value of an expression
 -- Example: return $ dump $ T_Literal id [c]
-dump :: Show a => a -> a
-dump x = trace (show x) x
+dump :: Show a => a -> a     -- STRIP
+dump x = trace (show x) x    -- STRIP
 
 -- Like above, but print a specific expression:
 -- Example: return $ dumps ("Returning: " ++ [c])  $ T_Literal id [c]
-dumps :: Show x => x -> a -> a
-dumps t = trace (show t)
+dumps :: Show x => x -> a -> a -- STRIP
+dumps t = trace (show t)       -- STRIP
 
 parseWithNotes parser = do
     item <- parser

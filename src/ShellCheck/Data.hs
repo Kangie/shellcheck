@@ -6,7 +6,7 @@ import ShellCheck.PortageAutoInternalVariables
 import Data.Version (showVersion)
 import Paths_ShellCheck (version)
 
-shellcheckVersion = showVersion version
+shellcheckVersion = showVersion version -- VERSIONSTRING
 
 genericInternalVariables = [
     -- Generic
@@ -240,3 +240,5 @@ shellForExecutable name =
         _ -> Nothing
 
 flagsForRead = "sreu:n:N:i:p:a:t:"
+
+declaringCommands = ["local", "declare", "export", "readonly", "typeset", "let"]

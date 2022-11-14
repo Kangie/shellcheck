@@ -1,5 +1,5 @@
 {-
-    Copyright 2012-2019 Vidar Holen
+    Copyright 2012-2020 Vidar Holen
 
     This file is part of ShellCheck.
     https://www.shellcheck.net
@@ -159,6 +159,11 @@ checkWithIncludesAndSourcePath includes mapper = getErrors
         siFindSource = mapper
     }
 
+checkWithRcIncludesAndSourcePath rc includes mapper = getErrors
+    (mockRcFile rc $ mockedSystemInterface includes) {
+        siFindSource = mapper
+    }
+
 prop_findsParseIssue = check "echo \"$12\"" == [1037]
 
 prop_commentDisablesParseIssue1 =
@@ -304,6 +309,13 @@ prop_canDisableShebangWarning = null $ result
         csScript = "#shellcheck disable=SC2148\nfoo"
     }
 
+prop_canDisableAllWarnings = result == [2086]
+  where
+    result = checkWithSpec [] emptyCheckSpec {
+        csFilename = "file.sh",
+        csScript = "#!/bin/sh\necho $1\n#shellcheck disable=all\necho `echo $1`"
+    }
+
 prop_canDisableParseErrors = null $ result
   where
     result = checkWithSpec [] emptyCheckSpec {
@@ -387,7 +399,7 @@ prop_canEnableOptionalsWithRc = result == [2244]
 
 prop_sourcePathRedirectsName = result == [2086]
   where
-    f "dir/myscript" _ "lib" = return "foo/lib"
+    f "dir/myscript" _ _ "lib" = return "foo/lib"
     result = checkWithIncludesAndSourcePath [("foo/lib", "echo $1")] f emptyCheckSpec {
         csScript = "#!/bin/bash\nsource lib",
         csFilename = "dir/myscript",
@@ -396,7 +408,7 @@ prop_sourcePathRedirectsName = result == [2086]
 
 prop_sourcePathAddsAnnotation = result == [2086]
   where
-    f "dir/myscript" ["mypath"] "lib" = return "foo/lib"
+    f "dir/myscript" _ ["mypath"] "lib" = return "foo/lib"
     result = checkWithIncludesAndSourcePath [("foo/lib", "echo $1")] f emptyCheckSpec {
         csScript = "#!/bin/bash\n# shellcheck source-path=mypath\nsource lib",
         csFilename = "dir/myscript",
@@ -405,13 +417,75 @@ prop_sourcePathAddsAnnotation = result == [2086]
 
 prop_sourcePathRedirectsDirective = result == [2086]
   where
-    f "dir/myscript" _ "lib" = return "foo/lib"
-    f _ _ _ = return "/dev/null"
+    f "dir/myscript" _ _ "lib" = return "foo/lib"
+    f _ _ _ _ = return "/dev/null"
     result = checkWithIncludesAndSourcePath [("foo/lib", "echo $1")] f emptyCheckSpec {
         csScript = "#!/bin/bash\n# shellcheck source=lib\nsource kittens",
         csFilename = "dir/myscript",
         csCheckSourced = True
     }
+
+prop_rcCanAllowExternalSources = result == [2086]
+  where
+    f "dir/myscript" (Just True) _ "mylib" = return "resolved/mylib"
+    f a b c d = error $ show ("Unexpected", a, b, c, d)
+    result = checkWithRcIncludesAndSourcePath "external-sources=true" [("resolved/mylib", "echo $1")] f emptyCheckSpec {
+        csScript = "#!/bin/bash\nsource mylib",
+        csFilename = "dir/myscript",
+        csCheckSourced = True
+    }
+
+prop_rcCanDenyExternalSources = result == [2086]
+  where
+    f "dir/myscript" (Just False) _ "mylib" = return "resolved/mylib"
+    f a b c d = error $ show ("Unexpected", a, b, c, d)
+    result = checkWithRcIncludesAndSourcePath "external-sources=false" [("resolved/mylib", "echo $1")] f emptyCheckSpec {
+        csScript = "#!/bin/bash\nsource mylib",
+        csFilename = "dir/myscript",
+        csCheckSourced = True
+    }
+
+prop_rcCanLeaveExternalSourcesUnspecified = result == [2086]
+  where
+    f "dir/myscript" Nothing _ "mylib" = return "resolved/mylib"
+    f a b c d = error $ show ("Unexpected", a, b, c, d)
+    result = checkWithRcIncludesAndSourcePath "" [("resolved/mylib", "echo $1")] f emptyCheckSpec {
+        csScript = "#!/bin/bash\nsource mylib",
+        csFilename = "dir/myscript",
+        csCheckSourced = True
+    }
+
+prop_fileCanDisableExternalSources = result == [2006, 2086]
+  where
+    f "dir/myscript" (Just True) _ "withExternal" = return "withExternal"
+    f "dir/myscript" (Just False) _ "withoutExternal" = return "withoutExternal"
+    f a b c d = error $ show ("Unexpected", a, b, c, d)
+    result = checkWithRcIncludesAndSourcePath "external-sources=true" [("withExternal", "echo $1"), ("withoutExternal", "_=`foo`")] f emptyCheckSpec {
+        csScript = "#!/bin/bash\ntrue\nsource withExternal\n# shellcheck external-sources=false\nsource withoutExternal",
+        csFilename = "dir/myscript",
+        csCheckSourced = True
+    }
+
+prop_fileCannotEnableExternalSources = result == [1144]
+  where
+    f "dir/myscript" Nothing _ "foo" = return "foo"
+    f a b c d = error $ show ("Unexpected", a, b, c, d)
+    result = checkWithRcIncludesAndSourcePath "" [("foo", "true")] f emptyCheckSpec {
+        csScript = "#!/bin/bash\n# shellcheck external-sources=true\nsource foo",
+        csFilename = "dir/myscript",
+        csCheckSourced = True
+    }
+
+prop_fileCannotEnableExternalSources2 = result == [1144]
+  where
+    f "dir/myscript" (Just False) _ "foo" = return "foo"
+    f a b c d = error $ show ("Unexpected", a, b, c, d)
+    result = checkWithRcIncludesAndSourcePath "external-sources=false" [("foo", "true")] f emptyCheckSpec {
+        csScript = "#!/bin/bash\n# shellcheck external-sources=true\nsource foo",
+        csFilename = "dir/myscript",
+        csCheckSourced = True
+    }
+
 
 return []
 runTests = $quickCheckAll

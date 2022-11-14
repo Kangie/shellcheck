@@ -1,4 +1,5 @@
-[![Build Status](https://travis-ci.org/koalaman/shellcheck.svg?branch=master)](https://travis-ci.org/koalaman/shellcheck)
+[![Build Status](https://github.com/koalaman/shellcheck/actions/workflows/build.yml/badge.svg)](https://github.com/koalaman/shellcheck/actions/workflows/build.yml)
+
 
 # ShellCheck - A shell script static analysis tool
 
@@ -112,10 +113,6 @@ Services and platforms that have ShellCheck pre-installed and ready to use:
 * [CircleCI](https://circleci.com) via the [ShellCheck Orb](https://circleci.com/orbs/registry/orb/circleci/shellcheck)
 * [Github](https://github.com/features/actions) (only Linux)
 
-Services and platforms with third party plugins:
-
-* [SonarQube](https://www.sonarqube.org/) through [sonar-shellcheck-plugin](https://github.com/emerald-squad/sonar-shellcheck-plugin)
-
 Most other services, including [GitLab](https://about.gitlab.com/), let you install
 ShellCheck yourself, either through the system's package manager (see [Installing](#installing)),
 or by downloading and unpacking a [binary release](#installing-a-pre-compiled-binary).
@@ -143,7 +140,7 @@ On systems with Stack (installs to `~/.local/bin`):
 
 On Debian based distros:
 
-    apt-get install shellcheck
+    sudo apt install shellcheck
 
 On Arch Linux based distros:
 
@@ -157,8 +154,8 @@ On Gentoo based distros:
 
 On EPEL based distros:
 
-    yum -y install epel-release
-    yum install ShellCheck
+    sudo yum -y install epel-release
+    sudo yum install ShellCheck
 
 On Fedora based distros:
 
@@ -240,6 +237,19 @@ Distro packages already come with a `man` page. If you are building from source,
 ```console
 pandoc -s -f markdown-smart -t man shellcheck.1.md -o shellcheck.1
 sudo mv shellcheck.1 /usr/share/man/man1
+```
+
+### pre-commit
+
+To run ShellCheck via [pre-commit](https://pre-commit.com/), add the hook to your `.pre-commit-config.yaml`:
+
+```
+repos:
+-   repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.7.2
+    hooks:
+    -   id: shellcheck
+#       args: ["--severity=warning"]  # Optionally only show errors and warnings
 ```
 
 ### Travis CI
@@ -348,6 +358,7 @@ echo 'Don't forget to restart!'   # Singlequote closed by apostrophe
 echo 'Don\'t try this at home'    # Attempting to escape ' in ''
 echo 'Path is $PATH'              # Variables in single quotes
 trap "echo Took ${SECONDS}s" 0    # Prematurely expanded trap
+unset var[i]                      # Array index treated as glob
 ```
 
 ### Conditionals
@@ -366,6 +377,7 @@ ShellCheck can recognize many types of incorrect test statements.
 [ grep -q foo file ]              # Command without $(..)
 [[ "$$file" == *.jpg ]]           # Comparisons that can't succeed
 (( 1 -lt 2 ))                     # Using test operators in ((..))
+[ x ] & [ y ] | [ z ]             # Accidental backgrounding and piping
 ```
 
 ### Frequently misused commands
@@ -437,6 +449,8 @@ echo "Hello $name"                # Unassigned lowercase variables
 cmd | read bar; echo $bar         # Assignments in subshells
 cat foo | cp bar                  # Piping to commands that don't read
 printf '%s: %s\n' foo             # Mismatches in printf argument count
+eval "${array[@]}"                # Lost word boundaries in array eval
+for i in "${x[@]}"; do ${x[$i]}   # Using array value as key
 ```
 
 ### Robustness
@@ -461,6 +475,7 @@ ShellCheck will warn when using features not supported by the shebang. For examp
 echo {1..$n}                     # Works in ksh, but not bash/dash/sh
 echo {1..10}                     # Works in ksh and bash, but not dash/sh
 echo -n 42                       # Works in ksh, bash and dash, undefined in sh
+expr match str regex             # Unportable alias for `expr str : regex`
 trap 'exit 42' sigint            # Unportable signal spec
 cmd &> file                      # Unportable redirection operator
 read foo < /dev/tcp/host/22      # Unportable intercepted files
@@ -481,10 +496,15 @@ rm “file”                         # Unicode quotes
 echo "Hello world"                # Carriage return / DOS line endings
 echo hello \                      # Trailing spaces after \
 var=42 echo $var                  # Expansion of inlined environment
-#!/bin/bash -x -e                 # Common shebang errors
+!# bin/bash -x -e                 # Common shebang errors
 echo $((n/180*100))               # Unnecessary loss of precision
 ls *[:digit:].txt                 # Bad character class globs
 sed 's/foo/bar/' file > file      # Redirecting to input
+var2=$var2                        # Variable assigned to itself
+[ x$var = xval ]                  # Antiquated x-comparisons
+ls() { ls -l "$@"; }              # Infinitely recursive wrapper
+alias ls='ls -l'; ls foo          # Alias used before it takes effect
+for x; do for x; do               # Nested loop uses same variable
 while getopts "a" f; do case $f in "b") # Unhandled getopts flags
 ```
 

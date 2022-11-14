@@ -121,7 +121,7 @@ outputResult options ref result sys = do
 
 outputForFile color sys comments = do
     let fileName = sourceFile (head comments)
-    result <- (siReadFile sys) fileName
+    result <- siReadFile sys (Just True) fileName
     let contents = either (const "") id result
     let fileLinesList = lines contents
     let lineCount = length fileLinesList
@@ -174,7 +174,7 @@ showFixedString color comments lineNum fileLines =
 cuteIndent :: PositionedComment -> String
 cuteIndent comment =
     replicate (fromIntegral $ colNo comment - 1) ' ' ++
-        makeArrow ++ " " ++ code (codeNo comment) ++ ": " ++ messageText comment
+        makeArrow ++ " " ++ code (codeNo comment) ++ " (" ++ severityText comment ++ "): " ++ messageText comment
   where
     arrow n = '^' : replicate (fromIntegral $ n-2) '-' ++ "^"
     makeArrow =
