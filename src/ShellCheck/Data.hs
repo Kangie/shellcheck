@@ -119,7 +119,13 @@ portageManualInternalVariables = [
     "RESTRICT_PYTHON_ABIS", "PYTHON_MODNAME",
 
     -- ABI variables
-    "ABI", "DEFAULT_ABI"
+    "ABI", "DEFAULT_ABI",
+
+    -- AFDO variables
+    "AFDO_LOCATION",
+
+    -- Linguas
+    "LINGUAS"
   ]
 
 eclassVarsFromMap :: String -> [String]
