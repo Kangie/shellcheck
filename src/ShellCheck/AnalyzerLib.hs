@@ -103,7 +103,7 @@ data Parameters = Parameters {
     -- map from token id to start and end position
     tokenPositions     :: Map.Map Id (Position, Position),
     -- detailed type of any Portage related file
-    portageFileType    :: PortageFileType
+    portageFileType    :: PortageFileType,
     -- Result from Control Flow Graph analysis (including data flow analysis)
     cfgAnalysis :: CF.CFGAnalysis
     } deriving (Show)
@@ -242,9 +242,7 @@ makeParameters spec = params
         parentMap = getParentTree root,
         variableFlow = getVariableFlow params root,
         tokenPositions = asTokenPositions spec,
-        portageFileType = asPortageFileType spec
-    } in params
-  where root = asScript spec
+        portageFileType = asPortageFileType spec,
         cfgAnalysis = CF.analyzeControlFlow cfParams root
     }
     cfParams = CF.CFGParameters {

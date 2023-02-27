@@ -784,7 +784,6 @@ checkFindExec _ cmd@(T_SimpleCommand _ _ t@(h:r)) | cmd `isCommand` "find" = do
     fromWord _ = []
 checkFindExec _ _ = return ()
 
-
 commandNeverProducesSpaces params t =
     maybe False (`elem` noSpaceCommands) cmd
     || (maybe False (`elem` spacesFromArgsCommands) cmd && noArgsHaveSpaces t)
@@ -1098,27 +1097,6 @@ prop_checkSingleQuotedVariables6a = verify checkSingleQuotedVariables "sed -n '$
 prop_checkSingleQuotedVariables7 = verifyNot checkSingleQuotedVariables "PS1='$PWD \\$ '"
 prop_checkSingleQuotedVariables8 = verify checkSingleQuotedVariables "find . -exec echo '$1' {} +"
 prop_checkSingleQuotedVariables9 = verifyNot checkSingleQuotedVariables "find . -exec awk '{print $1}' {} \\;"
-<<<<<<< HEAD
-prop_checkSingleQuotedVariables10= verify checkSingleQuotedVariables "echo '`pwd`'"
-prop_checkSingleQuotedVariables11= verifyNot checkSingleQuotedVariables "sed '${/lol/d}'"
-prop_checkSingleQuotedVariables12= verifyNot checkSingleQuotedVariables "eval 'echo $1'"
-prop_checkSingleQuotedVariables13= verifyNot checkSingleQuotedVariables "busybox awk '{print $1}'"
-prop_checkSingleQuotedVariables14= verifyNot checkSingleQuotedVariables "[ -v 'bar[$foo]' ]"
-prop_checkSingleQuotedVariables15= verifyNot checkSingleQuotedVariables "git filter-branch 'test $GIT_COMMIT'"
-prop_checkSingleQuotedVariables16= verify checkSingleQuotedVariables "git '$a'"
-prop_checkSingleQuotedVariables17= verifyNot checkSingleQuotedVariables "rename 's/(.)a/$1/g' *"
-prop_checkSingleQuotedVariables18= verifyNot checkSingleQuotedVariables "echo '``'"
-prop_checkSingleQuotedVariables19= verifyNot checkSingleQuotedVariables "echo '```'"
-prop_checkSingleQuotedVariables20= verifyNot checkSingleQuotedVariables "mumps -run %XCMD 'W $O(^GLOBAL(5))'"
-prop_checkSingleQuotedVariables21= verifyNot checkSingleQuotedVariables "mumps -run LOOP%XCMD --xec 'W $O(^GLOBAL(6))'"
-prop_checkSingleQuotedVariables22= verifyNot checkSingleQuotedVariables "jq '$__loc__'"
-prop_checkSingleQuotedVariables23= verifyNot checkSingleQuotedVariables "command jq '$__loc__'"
-prop_checkSingleQuotedVariables24= verifyNot checkSingleQuotedVariables "exec jq '$__loc__'"
-prop_checkSingleQuotedVariables25= verifyNot checkSingleQuotedVariables "exec -c -a foo jq '$__loc__'"
-prop_checkSingleQuotedVariablesCros1= verifyNot checkSingleQuotedVariables "python_gen_any_dep 'dev-python/pyyaml[${PYTHON_USEDEP}]'"
-prop_checkSingleQuotedVariablesCros2= verifyNot checkSingleQuotedVariables "python_gen_cond_dep 'dev-python/unittest2[${PYTHON_USEDEP}]' python2_7 pypy"
-prop_checkSingleQuotedVariablesCros3= verifyNot checkSingleQuotedVariables "version_format_string '${PN}_source_$1_$2-$3_$4'"
-=======
 prop_checkSingleQuotedVariables10 = verify checkSingleQuotedVariables "echo '`pwd`'"
 prop_checkSingleQuotedVariables11 = verifyNot checkSingleQuotedVariables "sed '${/lol/d}'"
 prop_checkSingleQuotedVariables12 = verifyNot checkSingleQuotedVariables "eval 'echo $1'"
@@ -1135,7 +1113,9 @@ prop_checkSingleQuotedVariables22 = verifyNot checkSingleQuotedVariables "jq '$_
 prop_checkSingleQuotedVariables23 = verifyNot checkSingleQuotedVariables "command jq '$__loc__'"
 prop_checkSingleQuotedVariables24 = verifyNot checkSingleQuotedVariables "exec jq '$__loc__'"
 prop_checkSingleQuotedVariables25 = verifyNot checkSingleQuotedVariables "exec -c -a foo jq '$__loc__'"
->>>>>>> 2f28847 (Normalize spaces around = in unit tests)
+prop_checkSingleQuotedVariablesCros1 = verifyNot checkSingleQuotedVariables "python_gen_any_dep 'dev-python/pyyaml[${PYTHON_USEDEP}]'"
+prop_checkSingleQuotedVariablesCros2 = verifyNot checkSingleQuotedVariables "python_gen_cond_dep 'dev-python/unittest2[${PYTHON_USEDEP}]' python2_7 pypy"
+prop_checkSingleQuotedVariablesCros3 = verifyNot checkSingleQuotedVariables "version_format_string '${PN}_source_$1_$2-$3_$4'"
 
 
 checkSingleQuotedVariables params t@(T_SingleQuoted id s) =
@@ -2105,112 +2085,10 @@ doVariableFlowAnalysis readFunc writeFunc empty flow = evalState (
         writeFunc base token name values
     doFlow _ = return []
 
----- Check whether variables could have spaces/globs
-prop_checkSpacefulness1 = verifyTree checkSpacefulness "a='cow moo'; echo $a"
-prop_checkSpacefulness2 = verifyNotTree checkSpacefulness "a='cow moo'; [[ $a ]]"
-prop_checkSpacefulness3 = verifyNotTree checkSpacefulness "a='cow*.mp3'; echo \"$a\""
-prop_checkSpacefulness4 = verifyTree checkSpacefulness "for f in *.mp3; do echo $f; done"
-prop_checkSpacefulness4a= verifyNotTree checkSpacefulness "foo=3; foo=$(echo $foo)"
-prop_checkSpacefulness5 = verifyTree checkSpacefulness "a='*'; b=$a; c=lol${b//foo/bar}; echo $c"
-prop_checkSpacefulness6 = verifyTree checkSpacefulness "a=foo$(lol); echo $a"
-prop_checkSpacefulness7 = verifyTree checkSpacefulness "a=foo\\ bar; rm $a"
-prop_checkSpacefulness8 = verifyNotTree checkSpacefulness "a=foo\\ bar; a=foo; rm $a"
-prop_checkSpacefulness10= verifyTree checkSpacefulness "rm $1"
-prop_checkSpacefulness11= verifyTree checkSpacefulness "rm ${10//foo/bar}"
-prop_checkSpacefulness12= verifyNotTree checkSpacefulness "(( $1 + 3 ))"
-prop_checkSpacefulness13= verifyNotTree checkSpacefulness "if [[ $2 -gt 14 ]]; then true; fi"
-prop_checkSpacefulness14= verifyNotTree checkSpacefulness "foo=$3 env"
-prop_checkSpacefulness15= verifyNotTree checkSpacefulness "local foo=$1"
-prop_checkSpacefulness16= verifyNotTree checkSpacefulness "declare foo=$1"
-prop_checkSpacefulness17= verifyTree checkSpacefulness "echo foo=$1"
-prop_checkSpacefulness18= verifyNotTree checkSpacefulness "$1 --flags"
-prop_checkSpacefulness19= verifyTree checkSpacefulness "echo $PWD"
-prop_checkSpacefulness20= verifyNotTree checkSpacefulness "n+='foo bar'"
-prop_checkSpacefulness21= verifyNotTree checkSpacefulness "select foo in $bar; do true; done"
-prop_checkSpacefulness22= verifyNotTree checkSpacefulness "echo $\"$1\""
-prop_checkSpacefulness23= verifyNotTree checkSpacefulness "a=(1); echo ${a[@]}"
-prop_checkSpacefulness24= verifyTree checkSpacefulness "a='a    b'; cat <<< $a"
-prop_checkSpacefulness25= verifyTree checkSpacefulness "a='s/[0-9]//g'; sed $a"
-prop_checkSpacefulness26= verifyTree checkSpacefulness "a='foo bar'; echo {1,2,$a}"
-prop_checkSpacefulness27= verifyNotTree checkSpacefulness "echo ${a:+'foo'}"
-prop_checkSpacefulness28= verifyNotTree checkSpacefulness "exec {n}>&1; echo $n"
-prop_checkSpacefulness29= verifyNotTree checkSpacefulness "n=$(stuff); exec {n}>&-;"
-prop_checkSpacefulness30= verifyTree checkSpacefulness "file='foo bar'; echo foo > $file;"
-prop_checkSpacefulness31= verifyNotTree checkSpacefulness "echo \"`echo \\\"$1\\\"`\""
-prop_checkSpacefulness32= verifyNotTree checkSpacefulness "var=$1; [ -v var ]"
-prop_checkSpacefulness33= verifyTree checkSpacefulness "for file; do echo $file; done"
-prop_checkSpacefulness34= verifyTree checkSpacefulness "declare foo$n=$1"
-prop_checkSpacefulness35= verifyNotTree checkSpacefulness "echo ${1+\"$1\"}"
-prop_checkSpacefulness36= verifyNotTree checkSpacefulness "arg=$#; echo $arg"
-prop_checkSpacefulness37= verifyNotTree checkSpacefulness "@test 'status' {\n [ $status -eq 0 ]\n}"
-prop_checkSpacefulness37v = verifyTree checkVerboseSpacefulness "@test 'status' {\n [ $status -eq 0 ]\n}"
-prop_checkSpacefulness38= verifyTree checkSpacefulness "a=; echo $a"
-prop_checkSpacefulness39= verifyNotTree checkSpacefulness "a=''\"\"''; b=x$a; echo $b"
-prop_checkSpacefulness40= verifyNotTree checkSpacefulness "a=$((x+1)); echo $a"
-prop_checkSpacefulness41= verifyNotTree checkSpacefulness "exec $1 --flags"
-prop_checkSpacefulness42= verifyNotTree checkSpacefulness "run $1 --flags"
-prop_checkSpacefulness43= verifyNotTree checkSpacefulness "$foo=42"
-prop_checkSpacefulness44= verifyTree checkSpacefulness "#!/bin/sh\nexport var=$value"
-prop_checkSpacefulness45= verifyNotTree checkSpacefulness "wait -zzx -p foo; echo $foo"
-prop_checkSpacefulness46= verifyNotTree checkSpacefulness "x=0; (( x += 1 )); echo $x"
-prop_checkSpacefulness47= verifyNotTree checkSpacefulness "x=0; (( x-- )); echo $x"
-prop_checkSpacefulness48= verifyNotTree checkSpacefulness "x=0; (( ++x )); echo $x"
-
-data SpaceStatus = SpaceSome | SpaceNone | SpaceEmpty deriving (Eq)
-instance Semigroup SpaceStatus where
-    SpaceNone <> SpaceNone = SpaceNone
-    SpaceSome <> _ = SpaceSome
-    _ <> SpaceSome = SpaceSome
-    SpaceEmpty <> x = x
-    x <> SpaceEmpty = x
-instance Monoid SpaceStatus where
-    mempty = SpaceEmpty
-    mappend = (<>)
-
--- This is slightly awkward because we want to support structured
--- optional checks based on nearly the same logic
-checkSpacefulness params = checkSpacefulness' onFind params
-  where
-    emit x = tell [x]
-    onFind spaces token _ =
-        when (spaces /= SpaceNone) $
-            if isDefaultAssignment (parentMap params) token
-            then
-                emit $ makeComment InfoC (getId token) 2223
-                         "This default assignment may cause DoS due to globbing. Quote it."
-            else
-                unless (quotesMayConflictWithSC2281 params token) $
-                    emit $ makeCommentWithFix InfoC (getId token) 2086
-                             "Double quote to prevent globbing and word splitting."
-                                (addDoubleQuotesAround params token)
-
-    isDefaultAssignment parents token =
-        let modifier = getBracedModifier $ bracedString token in
-            any (`isPrefixOf` modifier) ["=", ":="]
-            && isParamTo parents ":" token
-
-    -- Given a T_DollarBraced, return a simplified version of the string contents.
-    bracedString (T_DollarBraced _ _ l) = concat $ oversimplify l
-    bracedString _ = error "Internal shellcheck error, please report! (bracedString on non-variable)"
-
+-- Ensure that portage vars without spaces only exist when parsing portage files
 allVariablesWithoutSpaces params =
-    shellVariablesWithoutSpaces ++
+    variablesWithoutSpaces ++
     if isPortageBuild params then portageVariablesWithoutSpaces else []
-
-prop_checkSpacefulness4v= verifyTree checkVerboseSpacefulness "foo=3; foo=$(echo $foo)"
-prop_checkSpacefulness8v= verifyTree checkVerboseSpacefulness "a=foo\\ bar; a=foo; rm $a"
-prop_checkSpacefulness28v = verifyTree checkVerboseSpacefulness "exec {n}>&1; echo $n"
-prop_checkSpacefulness36v = verifyTree checkVerboseSpacefulness "arg=$#; echo $arg"
-prop_checkSpacefulness44v = verifyNotTree checkVerboseSpacefulness "foo=3; $foo=4"
-checkVerboseSpacefulness params = checkSpacefulness' onFind params
-  where
-    onFind spaces token name =
-        when (spaces == SpaceNone
-                && name `notElem` specialVariablesWithoutSpaces
-                && not (quotesMayConflictWithSC2281 params token)) $
-            tell [makeCommentWithFix StyleC (getId token) 2248
-                    "Prefer double quoting even when variables don't contain special characters."
-                    (addDoubleQuotesAround params token)]
 
 getInheritedEclasses :: Token -> [String]
 getInheritedEclasses root = execWriter $ doAnalysis findInheritedEclasses root
@@ -2347,44 +2225,7 @@ checkSpacefulnessCfg' dirtyPass params token@(T_DollarBraced id _ list) =
                     addDoubleQuotesAround params token
 
   where
-<<<<<<< HEAD
-    defaults = zip variablesWithoutSpaces (repeat SpaceNone)
-    variablesWithoutSpaces = allVariablesWithoutSpaces params
-
-    hasSpaces name = gets (Map.findWithDefault SpaceSome name)
-
-    setSpaces name status =
-        modify $ Map.insert name status
-
-    readF _ token name = do
-        spaces <- hasSpaces name
-        let needsQuoting =
-                  isExpansion token
-                  && not (isArrayExpansion token) -- There's another warning for this
-                  && not (isCountingReference token)
-                  && not (isQuoteFree (shellType params) parents token)
-                  && not (isQuotedAlternativeReference token)
-                  && not (usedAsCommandName parents token)
-
-        return . execWriter $ when needsQuoting $ onFind spaces token name
-
-      where
-        emit x = tell [x]
-
-    writeF _ _ name (DataString SourceExternal) = setSpaces name SpaceSome >> return []
-    writeF _ _ name (DataString SourceInteger) = setSpaces name SpaceNone >> return []
-
-    writeF _ _ name (DataString (SourceFrom vals)) = do
-        map <- get
-        setSpaces name
-            (isSpacefulWord (\x -> Map.findWithDefault SpaceSome x map) vals)
-        return []
-
-    writeF _ _ _ _ = return []
-
-=======
     name = getBracedReference $ concat $ oversimplify list
->>>>>>> da4885a (Use DFA for SC2086)
     parents = parentMap params
     needsQuoting =
               not (isArrayExpansion token) -- There's another warning for this
@@ -3489,7 +3330,7 @@ checkUncheckedCdPushdPopd params root =
             && not (name `elem` ["pushd", "popd"] && ("n" `elem` map snd (getAllFlags t)))
             && not (isCondition $ getPath (parentMap params) t) =
                 warnWithFix (getId t) 2164
-                    ("Use '" ++ name ++ " ... || " ++ exit ++ "' or '" ++ name ++ " ... || return' in case " ++ name ++ " fails.")
+                    ("Use '" ++ name ++ " ... || exit' or '" ++ name ++ " ... || return' in case " ++ name ++ " fails.")
                     (fixWith [replaceEnd (getId t) params 0 (" || " ++ exit)])
         where name = getName t
     checkElement _ = return ()
@@ -3842,7 +3683,6 @@ checkSplittingInArrays params t =
                 then "Quote to prevent word splitting/globbing, or split robustly with read -A or while read."
                 else "Quote to prevent word splitting/globbing, or split robustly with mapfile or read -a."
         _ -> return ()
-    variablesWithoutSpaces = allVariablesWithoutSpaces params
 
     forCommand id t =
         unless (commandNeverProducesSpaces params t) $
